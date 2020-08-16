@@ -157,7 +157,7 @@ struct Unfuckifier
             return false;
         }
 
-        auto cursor = clang_getTranslationUnitCursor(unit);
+        const auto cursor = clang_getTranslationUnitCursor(unit);
         //CXCursor cursor = clang_getTranslationUnitCursor(unit);
 
         clang_visitChildren(cursor, &Unfuckifier::visitChild, nullptr);
@@ -227,6 +227,85 @@ struct Unfuckifier
                 //clang_getInstantiationLocation(endLocation, &file, &line, &column, &offset);
                 //printf("End: Line: %u Column: %u Offset: %u\n", line, column, offset);
                 auto name = getString(clang_getCursorSpelling( c ));
+                CXSourceRange extent           = clang_getCursorExtent( parent );
+
+                CXSourceLocation startLocation = clang_getRangeStart( extent );
+                CXSourceLocation endLocation   = clang_getRangeEnd( extent );
+
+                unsigned int startLine = 0, startColumn = 0;
+                unsigned int endLine   = 0, endColumn   = 0;
+
+                clang_getSpellingLocation( endLocation,   nullptr, &endLine, &endColumn, nullptr );
+                clang_getSpellingLocation( startLocation, nullptr, &startLine, &startColumn, nullptr );
+                //if (startLine > 0 && (clang_getCursorType(c).kind == CXType_Auto || clang_getCursorType(parent).kind ==CXType_Auto )) {
+                    qDebug() << "\n=======";
+                    qDebug() << "cursor type" << clang_getTypeSpelling((clang_getCursorType(c)));
+                    qDebug() << "cursor kind" << clang_getTypeKindSpelling((clang_getCursorType(c).kind));
+                    qDebug() << "cursor displayname" << clang_getCursorDisplayName(c);
+                    CXCursor parentparent = clang_getCursorSemanticParent(parent);
+                    qDebug() << "parent display name" << clang_getCursorDisplayName(parentparent);
+                    qDebug() << "parent kind" << clang_getTypeKindSpelling((clang_getCursorType(parentparent).kind));
+                    qDebug() << "parent cursor kind" << clang_getCursorKind(parentparent);
+                    const std::string realType = getString(clang_getTypeSpelling((clang_getCursorType(c))));
+
+                    qDebug() << "-------\n";
+
+
+                    {
+                        //extent           = ;
+
+                        unsigned numTokens;
+                        CXToken *tokens = nullptr;
+                        clang_tokenize(translationUnit, clang_getCursorExtent(clang_getCursorSemanticParent(parent)), &tokens, &numTokens);
+                        CXToken *autoToken = nullptr;
+                        for (unsigned i=0; i<numTokens; i++) {
+                            if (clang_getTokenKind(tokens[i]) != CXToken_Keyword) {
+                                continue;
+                            }
+                            if (getString(clang_getTokenSpelling(translationUnit, tokens[i])) == "auto") {
+                                autoToken = &tokens[i];
+                            }
+                        }
+                        if (!autoToken) {
+                            clang_disposeTokens(translationUnit, tokens, numTokens);
+                            std::cerr << "Failed to find token!";
+                            exit(1); // todo find proper way
+                        }
+                        extent = clang_getTokenExtent(translationUnit, *autoToken);
+                        std::cout << getString(clang_getTokenSpelling(translationUnit, *autoToken)) << " -> " << realType;
+                        clang_disposeTokens(translationUnit, tokens, numTokens);
+
+                        startLocation = clang_getRangeStart( extent );
+                        endLocation   = clang_getRangeEnd( extent );
+                        clang_getSpellingLocation( endLocation,   nullptr, &endLine, &endColumn, nullptr );
+                        clang_getSpellingLocation( startLocation, nullptr, &startLine, &startColumn, nullptr );
+                        std::cout << "  " << name << ": " << endLine << "-" << startLine << " " << startColumn << ":" << endColumn << "\n";
+                    }
+                }
+            //}
+            //qDebug() << "-----\n";
+        //}
+#if 0
+        switch (cursorKind){
+            case CXType_FunctionProto:
+                qDebug() << "function proto return type" << clang_getTypeSpelling(clang_getCursorResultType(c));
+                break;
+            case CXCursor_DeclStmt:
+                //qDebug() << "decl" << clang_getCursorSpelling(c);
+                break;
+            case CXType_Typedef:
+                //qDebug() << "typedef" << clang_getTypedefName(clang_getCursorType(c));
+                //if (parent) {
+                //qDebug() << "typedef" << clang_getTypedefName(clang_getCursorType(parent));
+                //}
+                //qDebug() << "cursor type" << clang_getTypeSpelling((clang_getCursorType(c)));
+                //qDebug() << "canonical type" << clang_getTypeSpelling(clang_getCanonicalType(clang_getCursorType(c)));
+                //qDebug() << "Args" << clang_Cursor_getNumArguments(c);
+                break;
+            case CXCursor_VarDecl:
+                //if (clang_getCursorType(c) == CXType_Auto) {
+                if (clang_getCursorType(c).kind == CXType_Auto) {
+                const auto name = getString(clang_getCursorSpelling( c ));
                 CXSourceRange extent           = clang_getCursorExtent( c );
                 CXSourceLocation startLocation = clang_getRangeStart( extent );
                 CXSourceLocation endLocation   = clang_getRangeEnd( extent );
@@ -249,51 +328,12 @@ struct Unfuckifier
                     qDebug() << "-------\n";
 
 
-                    std::cout << "  " << name << ": " << endLine << "-" << startLine << " " << startColumn << "\n";
-                    {
-                        extent           = clang_getCursorExtent( parent );
-                        startLocation = clang_getRangeStart( extent );
-                        endLocation   = clang_getRangeEnd( extent );
-                        clang_getSpellingLocation( endLocation,   nullptr, &endLine, &endColumn, nullptr );
-                        clang_getSpellingLocation( startLocation, nullptr, &startLine, &startColumn, nullptr );
-                        std::cout << "  " << name << ": " << endLine << "-" << startLine << " " << startColumn << "\n";
-                    }
-                    {
-                        extent           = clang_getCursorExtent( clang_getCursorSemanticParent(parent) );
-                        startLocation = clang_getRangeStart( extent );
-                        endLocation   = clang_getRangeEnd( extent );
-                        clang_getSpellingLocation( endLocation,   nullptr, &endLine, &endColumn, nullptr );
-                        clang_getSpellingLocation( startLocation, nullptr, &startLine, &startColumn, nullptr );
-                        std::cout << "  " << name << ": " << endLine << "-" << startLine << " " << startColumn << "\n";
-                    }
-                //}
-            }
-            //qDebug() << "-----\n";
-        //}
-        switch (cursorKind){
-            case CXType_FunctionProto:
-                qDebug() << "function proto return type" << clang_getTypeSpelling(clang_getCursorResultType(c));
-                break;
-            case CXCursor_DeclStmt:
-                //qDebug() << "decl" << clang_getCursorSpelling(c);
-                break;
-            case CXType_Typedef:
-                //qDebug() << "typedef" << clang_getTypedefName(clang_getCursorType(c));
-                //if (parent) {
-                //qDebug() << "typedef" << clang_getTypedefName(clang_getCursorType(parent));
-                //}
-                //qDebug() << "cursor type" << clang_getTypeSpelling((clang_getCursorType(c)));
-                //qDebug() << "canonical type" << clang_getTypeSpelling(clang_getCanonicalType(clang_getCursorType(c)));
-                //qDebug() << "Args" << clang_Cursor_getNumArguments(c);
-                break;
-            case CXCursor_VarDecl:
-                //if (clang_getCursorType(c) == CXType_Auto) {
-                //if (clang_getCursorType(c).kind == CXType_Auto) {
+                    std::cout << "  " << name << ": " << endLine << "-" << startLine << " " << startColumn << ":" << endColumn << "\n";
                 //    qDebug() << "vardecl:" << clang_getCursorSpelling(c);
                 //    qDebug() << clang_getTypeSpelling(clang_getCanonicalType(clang_getCursorType(c)));
                 //    qDebug() << clang_getTypeSpelling((clang_getCursorType(c)));
                 //    qDebug() << clang_getTypedefName((clang_getCursorType(c)));
-                //}
+                }
                 break;
             case CXCursor_CXXAccessSpecifier:
             case CXCursor_CXXBoolLiteralExpr:
@@ -310,6 +350,7 @@ struct Unfuckifier
                 break;
                 return CXChildVisit_Recurse;
         }
+#endif
         //qDebug() << "-------";
         //if (cursorKind == CXCursor_CXXMethod) {
         //    handleMethod(c, parent);
