@@ -34,35 +34,7 @@ std::string getString(const CXString &str)
     clang_disposeString(str);
     return ret;
 }
-typedef std::string asdf;
 
-static CXChildVisitResult functionVisitor( CXCursor cursor, CXCursor /* parent */, CXClientData /* clientData */ )
-{
-  if( clang_Location_isFromMainFile( clang_getCursorLocation( cursor ) ) == 0 )
-    return CXChildVisit_Continue;
-
-  CXCursorKind kind = clang_getCursorKind( cursor );
-  auto name = getString(clang_getCursorSpelling( cursor ));
-
-  if( kind == CXCursorKind::CXCursor_FunctionDecl || kind == CXCursorKind::CXCursor_CXXMethod || kind == CXCursorKind::CXCursor_FunctionTemplate )
-  {
-    CXSourceRange extent           = clang_getCursorExtent( cursor );
-    CXSourceLocation startLocation = clang_getRangeStart( extent );
-    CXSourceLocation endLocation   = clang_getRangeEnd( extent );
-
-    unsigned int startLine = 0, startColumn = 0;
-    unsigned int endLine   = 0, endColumn   = 0;
-
-    clang_getSpellingLocation( startLocation, nullptr, &startLine, &startColumn, nullptr );
-    clang_getSpellingLocation( endLocation,   nullptr, &endLine, &endColumn, nullptr );
-
-    std::cout << "  " << name << ": " << endLine - startLine << "\n";
-  }
-
-  return CXChildVisit_Recurse;
-}
-
-static        CXTranslationUnit translationUnit;
 struct Unfuckifier
 {
     bool parseCompileDatabase(const QFileInfo &fileInfo)
@@ -118,17 +90,14 @@ struct Unfuckifier
                 &translationUnit
             );
 
-        CXCursor rootCursor = clang_getTranslationUnitCursor( translationUnit );
-        clang_visitChildren( rootCursor, functionVisitor, this );
 
         if (translationUnit == nullptr) {
             qWarning() << "Unable to parse translation unit. Quitting.";
             return false;
         }
 
-        //CXCursor cursor = clang_getTranslationUnitCursor(translationUnit);
         auto cursor = clang_getTranslationUnitCursor(translationUnit);
-        clang_visitChildren(cursor, &Unfuckifier::visitChild, nullptr);
+        clang_visitChildren(cursor, &Unfuckifier::visitChild, this);
 
         for (size_t i = 0; i < numArguments; i++) {
             delete[] arguments[i];
@@ -137,36 +106,50 @@ struct Unfuckifier
         delete[] arguments;
         clang_disposeIndex(index);
 
+        fixFile("/home/sandsmark/src/unfuckify/main.cpp");
+
         return true;
     }
 
-    bool parseFile(const std::string &filename)
+    void fixFile(const std::string &filePath)
     {
-        CXIndex index = clang_createIndex(0, 0);
-        const char *opts[] = {
-            "-x", "c++"
-        };
-        CXTranslationUnit unit = clang_parseTranslationUnit(
-                index,
-                filename.c_str(), opts, 2,
-                nullptr, 0,
-                CXTranslationUnit_KeepGoing | CXTranslationUnit_SingleFileParse);
-
-        if (unit == nullptr) {
-            qWarning() << "Unable to parse translation unit. Quitting.";
-            return false;
+        FILE *file = fopen(filePath.c_str(), "r");
+        if (!file) {
+            std::cerr << "Failed to open file " << filePath << std::endl;
+            return;
         }
 
-        const auto cursor = clang_getTranslationUnitCursor(unit);
-        //CXCursor cursor = clang_getTranslationUnitCursor(unit);
+        fseek(file, 0, SEEK_END);
+        const long fileSize = ftell(file);
+        fseek(file, 0, SEEK_SET);
 
-        clang_visitChildren(cursor, &Unfuckifier::visitChild, nullptr);
-        qDebug() << "Parsing complete";
+        FILE *outFile = fopen((filePath + "-fixed").c_str(), "w");
+        if (!outFile) {
+            std::cerr << "Failed to open out file " << filePath << std::endl;
+            return;
+        }
 
-        clang_disposeTranslationUnit(unit);
-        clang_disposeIndex(index);
+        std::cout << "fixing " << replacements.size() << std::endl;
 
-        return true;
+        std::vector<char> buffer;
+        int lastPos = 0;
+        for (const Replacement &replacement : replacements) {
+            buffer.resize(replacement.start - lastPos);
+            fread(buffer.data(), buffer.size(), 1, file);
+            fwrite(buffer.data(), buffer.size(), 1, outFile);
+            fwrite(replacement.string.c_str(), replacement.string.size(), 1, outFile);
+
+            lastPos = replacement.end;
+            fseek(file, replacement.end - replacement.start, SEEK_CUR);
+        }
+        if (lastPos < fileSize) {
+            buffer.resize(fileSize - lastPos);
+            fread(buffer.data(), buffer.size(), 1, file);
+            fwrite(buffer.data(), buffer.size(), 1, outFile);
+        }
+
+        fclose(file);
+        fclose(outFile);
     }
 
     static CXChildVisitResult visitChild(CXCursor c, CXCursor parent, CXClientData client_data)
@@ -186,179 +169,51 @@ struct Unfuckifier
         if (!clang_Location_isFromMainFile(parentLoc)) {
             return CXChildVisit_Recurse;
         }
-//                qDebug() << "\n=======";
-//        qDebug() << "cursor type" << clang_getTypeSpelling((clang_getCursorType(c)));
-//        qDebug() << "cursor kind" << clang_getTypeKindSpelling((clang_getCursorType(c).kind));
-//        qDebug() << "cursor displayname" << clang_getCursorDisplayName(c);
-//        qDebug() << "parent display name" << clang_getCursorDisplayName(parent);
-//        qDebug() << "parent kind" << clang_getTypeKindSpelling((clang_getCursorType(parent).kind));
-//        qDebug() << "parent cursor kind" << clang_getCursorKind(parent);
-//
-//                qDebug() << "-------\n";
 
-        //qDebug() << "cursor pretty" << clang_getCursorPrettyPrinted(c, nullptr);
-        //if (clang_getCursorType(c).kind == CXType_FunctionProto) {
-        //        qDebug() << "f- unction proto return type" << clang_getTypeSpelling(clang_getCursorResultType(c));
-        //        qDebug() << "cursor type" << clang_getTypeSpelling((clang_getCursorType(c)));
-        //        qDebug() << "cursor kind" << clang_getTypeKindSpelling((clang_getCursorType(c).kind));
-        //        qDebug() << "cursor displayname" << clang_getCursorDisplayName(c);
-        //        qDebug() << "canonical type" << clang_getTypeSpelling(clang_getCanonicalType(clang_getCursorType(c)));
-        //        qDebug() << "-------";
-        //}
-        
-        //if (clang_getCursorType(parent).kind == CXType_Auto) {// && clang_getCursorKind(parent) == CXCursor_CallExpr ) {// && clang_getCursorType(c).kind == CXType_Elaborated) {
-        //if (clang_getCursorKind(parent) == CXCursor_VarDecl) {// && clang_getCursorType(c).kind == CXType_Elaborated) {
-           // qDebug() << "\nparent:" << clang_getCursorSpelling(parent);
-           // qDebug() << clang_getTypeSpelling(clang_getCanonicalType(clang_getCursorType(parent)));
-           // qDebug() << "parent type" << clang_getTypeSpelling((clang_getCursorType(parent)));
-           // qDebug() <<  "parent typedef" << clang_getTypedefName((clang_getCursorType(parent)));
-           // qDebug() << clang_getCursorKind(parent);
-           // qDebug() << "=======";
-           // qDebug() << "vardecl:" << clang_getCursorSpelling(c);
-           // qDebug() << clang_getTypeSpelling(clang_getCanonicalType(clang_getCursorType(c)));
-           // qDebug() << "cursor type:" << clang_getTypeSpelling((clang_getCursorType(c)));
-           // qDebug() << "typedef" << clang_getTypedefName((clang_getCursorType(c)));
+        if(clang_getCursorKind(parent) == CXCursor_CallExpr && clang_getCursorType(parent).kind == CXType_Auto) {
+            unsigned numTokens;
+            CXToken *tokens = nullptr;
+            clang_tokenize(that->translationUnit, clang_getCursorExtent(clang_getCursorSemanticParent(parent)), &tokens, &numTokens);
 
-            if(clang_getCursorKind(parent) == CXCursor_CallExpr && clang_getCursorType(parent).kind == CXType_Auto) {
-                //CXFile file;
-                //unsigned int line, column, offset;
-                //clang_getInstantiationLocation(startLocation, &file, &line, &column, &offset);
-                //printf("Start: Line: %u Column: %u Offset: %u\n", line, column, offset);
-                //clang_getInstantiationLocation(endLocation, &file, &line, &column, &offset);
-                //printf("End: Line: %u Column: %u Offset: %u\n", line, column, offset);
-                auto name = getString(clang_getCursorSpelling( c ));
-                CXSourceRange extent           = clang_getCursorExtent( parent );
-
-                CXSourceLocation startLocation = clang_getRangeStart( extent );
-                CXSourceLocation endLocation   = clang_getRangeEnd( extent );
-
-                unsigned int startLine = 0, startColumn = 0;
-                unsigned int endLine   = 0, endColumn   = 0;
-
-                clang_getSpellingLocation( endLocation,   nullptr, &endLine, &endColumn, nullptr );
-                clang_getSpellingLocation( startLocation, nullptr, &startLine, &startColumn, nullptr );
-                //if (startLine > 0 && (clang_getCursorType(c).kind == CXType_Auto || clang_getCursorType(parent).kind ==CXType_Auto )) {
-                    qDebug() << "\n=======";
-                    qDebug() << "cursor type" << clang_getTypeSpelling((clang_getCursorType(c)));
-                    qDebug() << "cursor kind" << clang_getTypeKindSpelling((clang_getCursorType(c).kind));
-                    qDebug() << "cursor displayname" << clang_getCursorDisplayName(c);
-                    CXCursor parentparent = clang_getCursorSemanticParent(parent);
-                    qDebug() << "parent display name" << clang_getCursorDisplayName(parentparent);
-                    qDebug() << "parent kind" << clang_getTypeKindSpelling((clang_getCursorType(parentparent).kind));
-                    qDebug() << "parent cursor kind" << clang_getCursorKind(parentparent);
-                    const std::string realType = getString(clang_getTypeSpelling((clang_getCursorType(c))));
-
-                    qDebug() << "-------\n";
-
-
-                    {
-                        //extent           = ;
-
-                        unsigned numTokens;
-                        CXToken *tokens = nullptr;
-                        clang_tokenize(translationUnit, clang_getCursorExtent(clang_getCursorSemanticParent(parent)), &tokens, &numTokens);
-                        CXToken *autoToken = nullptr;
-                        for (unsigned i=0; i<numTokens; i++) {
-                            if (clang_getTokenKind(tokens[i]) != CXToken_Keyword) {
-                                continue;
-                            }
-                            if (getString(clang_getTokenSpelling(translationUnit, tokens[i])) == "auto") {
-                                autoToken = &tokens[i];
-                            }
-                        }
-                        if (!autoToken) {
-                            clang_disposeTokens(translationUnit, tokens, numTokens);
-                            std::cerr << "Failed to find token!";
-                            exit(1); // todo find proper way
-                        }
-                        extent = clang_getTokenExtent(translationUnit, *autoToken);
-                        std::cout << getString(clang_getTokenSpelling(translationUnit, *autoToken)) << " -> " << realType;
-                        clang_disposeTokens(translationUnit, tokens, numTokens);
-
-                        startLocation = clang_getRangeStart( extent );
-                        endLocation   = clang_getRangeEnd( extent );
-                        clang_getSpellingLocation( endLocation,   nullptr, &endLine, &endColumn, nullptr );
-                        clang_getSpellingLocation( startLocation, nullptr, &startLine, &startColumn, nullptr );
-                        std::cout << "  " << name << ": " << endLine << "-" << startLine << " " << startColumn << ":" << endColumn << "\n";
-                    }
+            CXToken *autoToken = nullptr;
+            for (unsigned i=0; i<numTokens; i++) {
+                if (clang_getTokenKind(tokens[i]) != CXToken_Keyword) {
+                    continue;
                 }
-            //}
-            //qDebug() << "-----\n";
-        //}
-#if 0
-        switch (cursorKind){
-            case CXType_FunctionProto:
-                qDebug() << "function proto return type" << clang_getTypeSpelling(clang_getCursorResultType(c));
-                break;
-            case CXCursor_DeclStmt:
-                //qDebug() << "decl" << clang_getCursorSpelling(c);
-                break;
-            case CXType_Typedef:
-                //qDebug() << "typedef" << clang_getTypedefName(clang_getCursorType(c));
-                //if (parent) {
-                //qDebug() << "typedef" << clang_getTypedefName(clang_getCursorType(parent));
-                //}
-                //qDebug() << "cursor type" << clang_getTypeSpelling((clang_getCursorType(c)));
-                //qDebug() << "canonical type" << clang_getTypeSpelling(clang_getCanonicalType(clang_getCursorType(c)));
-                //qDebug() << "Args" << clang_Cursor_getNumArguments(c);
-                break;
-            case CXCursor_VarDecl:
-                //if (clang_getCursorType(c) == CXType_Auto) {
-                if (clang_getCursorType(c).kind == CXType_Auto) {
-                const auto name = getString(clang_getCursorSpelling( c ));
-                CXSourceRange extent           = clang_getCursorExtent( c );
-                CXSourceLocation startLocation = clang_getRangeStart( extent );
-                CXSourceLocation endLocation   = clang_getRangeEnd( extent );
-
-                unsigned int startLine = 0, startColumn = 0;
-                unsigned int endLine   = 0, endColumn   = 0;
-
-                clang_getSpellingLocation( endLocation,   nullptr, &endLine, &endColumn, nullptr );
-                clang_getSpellingLocation( startLocation, nullptr, &startLine, &startColumn, nullptr );
-                //if (startLine > 0 && (clang_getCursorType(c).kind == CXType_Auto || clang_getCursorType(parent).kind ==CXType_Auto )) {
-                    qDebug() << "\n=======";
-                    qDebug() << "cursor type" << clang_getTypeSpelling((clang_getCursorType(c)));
-                    qDebug() << "cursor kind" << clang_getTypeKindSpelling((clang_getCursorType(c).kind));
-                    qDebug() << "cursor displayname" << clang_getCursorDisplayName(c);
-                    CXCursor parentparent = clang_getCursorSemanticParent(parent);
-                    qDebug() << "parent display name" << clang_getCursorDisplayName(parentparent);
-                    qDebug() << "parent kind" << clang_getTypeKindSpelling((clang_getCursorType(parentparent).kind));
-                    qDebug() << "parent cursor kind" << clang_getCursorKind(parentparent);
-
-                    qDebug() << "-------\n";
-
-
-                    std::cout << "  " << name << ": " << endLine << "-" << startLine << " " << startColumn << ":" << endColumn << "\n";
-                //    qDebug() << "vardecl:" << clang_getCursorSpelling(c);
-                //    qDebug() << clang_getTypeSpelling(clang_getCanonicalType(clang_getCursorType(c)));
-                //    qDebug() << clang_getTypeSpelling((clang_getCursorType(c)));
-                //    qDebug() << clang_getTypedefName((clang_getCursorType(c)));
+                if (getString(clang_getTokenSpelling(that->translationUnit, tokens[i])) == "auto") {
+                    autoToken = &tokens[i];
                 }
-                break;
-            case CXCursor_CXXAccessSpecifier:
-            case CXCursor_CXXBoolLiteralExpr:
-            case CXCursor_Constructor:
-            case CXCursor_Destructor:
-            case CXCursor_CXXMethod: {
-                //CXType returnType = clang_getCursorResultType(c);
-                //qDebug() << "return type" << clang_getTypeSpelling(returnType);
-                break;
-             }
-            case CXCursor_ParmDecl:
-                break;
-            default:
-                break;
+            }
+            if (!autoToken) {
+                clang_disposeTokens(that->translationUnit, tokens, numTokens);
+                std::cerr << "Failed to find token!" << std::endl;
                 return CXChildVisit_Recurse;
+            }
+
+            Replacement replacement;
+            replacement.string = getString(clang_getTypeSpelling((clang_getCursorType(c))));
+            CXSourceRange extent = clang_getTokenExtent(that->translationUnit, *autoToken);
+            clang_disposeTokens(that->translationUnit, tokens, numTokens);
+            std::cout << "found" << std::endl;
+
+            const CXSourceLocation start = clang_getRangeStart(extent);
+            const CXSourceLocation end = clang_getRangeEnd(extent);
+            clang_getSpellingLocation(start, nullptr, nullptr, nullptr, &replacement.start);
+            clang_getSpellingLocation(end, nullptr, nullptr, nullptr, &replacement.end);
+
+            that->replacements.push_back(std::move(replacement));
         }
-#endif
-        //qDebug() << "-------";
-        //if (cursorKind == CXCursor_CXXMethod) {
-        //    handleMethod(c, parent);
-        //}
-        // TODO: if there's more we need to handle
+
         return CXChildVisit_Recurse;
     }
-    //std::unordered_map<CXSourceRange, std::string> m_replacements;
+
+    struct Replacement {
+        unsigned start, end;
+        std::string string;
+    };
+    std::vector<Replacement> replacements;
+
+    CXTranslationUnit translationUnit;
 };
 
 int main(int argc, char *argv[])
@@ -387,12 +242,8 @@ int main(int argc, char *argv[])
             return 1;
         }
     } else {
-        //const std::string filename = fileInfo.canonicalFilePath().toUtf8().toStdString();
-        //std::cout << "Handling single file " << filename << std::endl;
-        //if (!fixer.parseFile(filename)) {
-            qWarning() << "Failed to parse" << fileInfo.fileName();
-            return 1;
-        //}
+        qWarning() << "Failed to parse" << fileInfo.fileName();
+        return 1;
     }
 
     return 0;
