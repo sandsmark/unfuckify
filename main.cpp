@@ -158,9 +158,9 @@ struct Unfuckifier {
 
             if (getString(clang_getTokenSpelling(translationUnit, tokens[i])) == "auto") {
                 handleAutoToken(&tokens[i]);
-                break;
             }
         }
+        clang_disposeTokens(translationUnit, tokens, numTokens);
 
         for (size_t i = 0; i < numArguments; i++) {
             delete[] arguments[i];
@@ -168,6 +168,7 @@ struct Unfuckifier {
 
         delete[] arguments;
         clang_disposeIndex(index);
+        clang_disposeTranslationUnit(translationUnit);
 
         return true;
     }
@@ -274,7 +275,7 @@ int main(int argc, char *argv[])
     Unfuckifier fixer;
 
     if (!fixer.process(compileDbPath.string(), sourceFile.string())) {
-        std::cerr << "Failed to parse process " << sourceFile << std::endl;
+        std::cerr << "Failed to process " << sourceFile << std::endl;
         return 1;
     }
 
