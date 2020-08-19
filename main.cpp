@@ -27,31 +27,26 @@ std::string getString(const CXString &str)
 }
 
 struct Unfuckifier {
-    void test(const std::string &compilePath)
+    void handleAutoToken(CXToken *autoToken)
     {
-        CXCompilationDatabase_Error compilationDatabaseError;
-        CXCompilationDatabase compilationDatabase = clang_CompilationDatabase_fromDirectory(
-                    compilePath.c_str(),
-                    &compilationDatabaseError
-                );
+        CXCursor cursor;
+        clang_annotateTokens(translationUnit, autoToken, 1, &cursor);
 
-        CXCompileCommands compileCommands = clang_CompilationDatabase_getAllCompileCommands(
-                                                compilationDatabase
-                                            );
-        size_t numCompileCommands = clang_CompileCommands_getSize(compileCommands);
-        std::cout << "Compile commands: " << numCompileCommands << std::endl;
-        for (size_t i=0; i < numCompileCommands; i++) {
-            CXCompileCommand command = clang_CompileCommands_getCommand(compileCommands, i);
-            std::cout << clang_CompileCommand_getFilename(command) << std::endl;
-        }
+        Replacement replacement;
+        replacement.string = getString(clang_getTypeSpelling((clang_getCursorType(cursor))));
+        CXSourceRange extent = clang_getTokenExtent(translationUnit, *autoToken);
 
-        clang_CompileCommands_dispose(compileCommands);
-        clang_CompilationDatabase_dispose(compilationDatabase);
+        const CXSourceLocation start = clang_getRangeStart(extent);
+        const CXSourceLocation end = clang_getRangeEnd(extent);
+        clang_getSpellingLocation(start, nullptr, nullptr, nullptr, &replacement.start);
+        clang_getSpellingLocation(end, nullptr, nullptr, nullptr, &replacement.end);
+
+        replacements.push_back(std::move(replacement));
     }
+
     bool process(const std::string &compilePath, const std::string &sourceFile)
     {
         std::cout << "Processing " << sourceFile << std::endl;
-        //test(compilePath);
 
         CXCompilationDatabase_Error compilationDatabaseError;
         CXCompilationDatabase compilationDatabase = clang_CompilationDatabase_fromDirectory(
@@ -98,8 +93,8 @@ struct Unfuckifier {
             clang_disposeString(argument);
         }
         std::cout << std::endl;
-        //clang_CompileCommands_dispose(compileCommands);
-        //clang_CompilationDatabase_dispose(compilationDatabase);
+        clang_CompileCommands_dispose(compileCommands);
+        clang_CompilationDatabase_dispose(compilationDatabase);
 
         CXIndex index = clang_createIndex(
                             0,
@@ -148,8 +143,24 @@ struct Unfuckifier {
 
         // auto for testing
         auto cursor = clang_getTranslationUnitCursor(translationUnit);
-        clang_visitChildren(cursor, &Unfuckifier::visitChild, this);
-        std::cout << "Visited " << childrenVisited << " AST nodes" << std::endl;
+
+        // We can't traverse the AST, because auto's are already resolved
+        unsigned numTokens;
+        CXToken *tokens = nullptr;
+        clang_tokenize(translationUnit, clang_getCursorExtent(cursor), &tokens, &numTokens);
+
+        CXToken *autoToken = nullptr;
+
+        for (unsigned i = 0; i < numTokens; i++) {
+            if (clang_getTokenKind(tokens[i]) != CXToken_Keyword) {
+                continue;
+            }
+
+            if (getString(clang_getTokenSpelling(translationUnit, tokens[i])) == "auto") {
+                handleAutoToken(&tokens[i]);
+                break;
+            }
+        }
 
         for (size_t i = 0; i < numArguments; i++) {
             delete[] arguments[i];
@@ -212,65 +223,6 @@ struct Unfuckifier {
         fclose(outFile);
 
         return true;
-    }
-
-    static CXChildVisitResult visitChild(CXCursor cursor, CXCursor parent, CXClientData client_data)
-    {
-        Unfuckifier *that = reinterpret_cast<Unfuckifier *>(client_data);
-        that->childrenVisited++;
-
-        CXSourceLocation loc = clang_getCursorLocation(cursor);
-
-        if (clang_Location_isInSystemHeader(loc)) {
-            return CXChildVisit_Continue;
-        }
-
-        if (!clang_Location_isFromMainFile(loc)) {
-            return CXChildVisit_Continue;
-        }
-
-        // TODO: this just picks up `auto foo = bar()`, to handle `auto foo = 0`
-        // we need to drop the parent-parent stuff I think
-        if (clang_getCursorKind(parent) == CXCursor_CallExpr && clang_getCursorType(parent).kind == CXType_Auto) {
-            std::cout << "Found auto" << std::endl;
-            unsigned numTokens;
-            CXToken *tokens = nullptr;
-            clang_tokenize(that->translationUnit, clang_getCursorExtent(clang_getCursorSemanticParent(parent)), &tokens, &numTokens);
-
-            CXToken *autoToken = nullptr;
-
-            for (unsigned i = 0; i < numTokens; i++) {
-                if (clang_getTokenKind(tokens[i]) != CXToken_Keyword) {
-                    continue;
-                }
-
-                if (getString(clang_getTokenSpelling(that->translationUnit, tokens[i])) == "auto") {
-                    autoToken = &tokens[i];
-                    break;
-                }
-            }
-
-            if (!autoToken) {
-                clang_disposeTokens(that->translationUnit, tokens, numTokens);
-                std::cerr << "Failed to find token!" << std::endl;
-                return CXChildVisit_Recurse;
-            }
-
-            Replacement replacement;
-            replacement.string = getString(clang_getTypeSpelling((clang_getCursorType(parent))));
-            CXSourceRange extent = clang_getTokenExtent(that->translationUnit, *autoToken);
-            clang_disposeTokens(that->translationUnit, tokens, numTokens);
-
-            const CXSourceLocation start = clang_getRangeStart(extent);
-            const CXSourceLocation end = clang_getRangeEnd(extent);
-            clang_getSpellingLocation(start, nullptr, nullptr, nullptr, &replacement.start);
-            clang_getSpellingLocation(end, nullptr, nullptr, nullptr, &replacement.end);
-
-            that->replacements.push_back(std::move(replacement));
-            return CXChildVisit_Recurse;
-        }
-
-        return CXChildVisit_Recurse;
     }
 
     struct Replacement {
