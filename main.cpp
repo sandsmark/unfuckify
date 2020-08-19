@@ -152,26 +152,18 @@ struct Unfuckifier {
         return true;
     }
 
-    static CXChildVisitResult visitChild(CXCursor c, CXCursor parent, CXClientData client_data)
+    static CXChildVisitResult visitChild(CXCursor cursor, CXCursor parent, CXClientData client_data)
     {
         Unfuckifier *that = reinterpret_cast<Unfuckifier *>(client_data);
 
-        CXSourceLocation loc = clang_getCursorLocation(c);
+        CXSourceLocation loc = clang_getCursorLocation(cursor);
 
         if (clang_Location_isInSystemHeader(loc)) {
             return CXChildVisit_Continue;
         }
 
-        const CXCursorKind cursorKind = clang_getCursorKind(c);
-
         if (!clang_Location_isFromMainFile(loc)) {
-            return CXChildVisit_Recurse;
-        }
-
-        CXSourceLocation parentLoc = clang_getCursorLocation(parent);
-
-        if (!clang_Location_isFromMainFile(parentLoc)) {
-            return CXChildVisit_Recurse;
+            return CXChildVisit_Continue;
         }
 
         // TODO: this just picks up `auto foo = bar()`, to handle `auto foo = 0`
@@ -190,6 +182,7 @@ struct Unfuckifier {
 
                 if (getString(clang_getTokenSpelling(that->translationUnit, tokens[i])) == "auto") {
                     autoToken = &tokens[i];
+                    break;
                 }
             }
 
@@ -200,7 +193,7 @@ struct Unfuckifier {
             }
 
             Replacement replacement;
-            replacement.string = getString(clang_getTypeSpelling((clang_getCursorType(c))));
+            replacement.string = getString(clang_getTypeSpelling((clang_getCursorType(parent))));
             CXSourceRange extent = clang_getTokenExtent(that->translationUnit, *autoToken);
             clang_disposeTokens(that->translationUnit, tokens, numTokens);
 
