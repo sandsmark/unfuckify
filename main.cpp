@@ -1,26 +1,17 @@
-#include <QCoreApplication>
-#include <QDebug>
-#include <QByteArray>
-#include <QFileInfo>
 #include <iostream>
 #include <fstream>
 #include <unordered_set>
 #include <unordered_map>
 #include <map>
+#include <filesystem>
+#include <vector>
+
 
 extern "C" {
 #include <clang-c/Index.h>
 #include <clang-c/CXCompilationDatabase.h>
 }
 
-inline QDebug operator<<(QDebug debug, const CXString &str)
-{
-    QDebugStateSaver saver(debug);
-    debug.nospace() << clang_getCString(str);
-    clang_disposeString(str);
-
-    return debug;
-}
 std::ostream &operator<<(std::ostream &stream, const CXString &str)
 {
     stream << clang_getCString(str);
@@ -36,9 +27,31 @@ std::string getString(const CXString &str)
 }
 
 struct Unfuckifier {
-    bool parseCompileDatabase(const QFileInfo &fileInfo, const std::string &sourceFile)
+    void test(const std::string &compilePath)
     {
-        const std::string compilePath = fileInfo.canonicalPath().toUtf8().toStdString();
+        CXCompilationDatabase_Error compilationDatabaseError;
+        CXCompilationDatabase compilationDatabase = clang_CompilationDatabase_fromDirectory(
+                    compilePath.c_str(),
+                    &compilationDatabaseError
+                );
+
+        CXCompileCommands compileCommands = clang_CompilationDatabase_getAllCompileCommands(
+                                                compilationDatabase
+                                            );
+        size_t numCompileCommands = clang_CompileCommands_getSize(compileCommands);
+        std::cout << "Compile commands: " << numCompileCommands << std::endl;
+        for (size_t i=0; i < numCompileCommands; i++) {
+            CXCompileCommand command = clang_CompileCommands_getCommand(compileCommands, i);
+            std::cout << clang_CompileCommand_getFilename(command) << std::endl;
+        }
+
+        clang_CompileCommands_dispose(compileCommands);
+        clang_CompilationDatabase_dispose(compilationDatabase);
+    }
+    bool process(const std::string &compilePath, const std::string &sourceFile)
+    {
+        std::cout << "Processing " << sourceFile << std::endl;
+        //test(compilePath);
 
         CXCompilationDatabase_Error compilationDatabaseError;
         CXCompilationDatabase compilationDatabase = clang_CompilationDatabase_fromDirectory(
@@ -46,16 +59,32 @@ struct Unfuckifier {
                     &compilationDatabaseError
                 );
 
+        if (compilationDatabaseError != CXCompilationDatabase_NoError) {
+            std::cerr << "Failed to load " << compilePath << "(err " << compilationDatabaseError << ")" << std::endl;
+            return false;
+        }
+
         CXCompileCommands compileCommands = clang_CompilationDatabase_getCompileCommands(
                                                 compilationDatabase,
                                                 sourceFile.c_str()
                                             );
+
+        if (!compileCommands) {
+            std::cerr << "Failed to find compile command for " << sourceFile << " in " << compilePath << std::endl;
+            return false;
+        }
+
         size_t numCompileCommands = clang_CompileCommands_getSize(compileCommands);
+        if (numCompileCommands == 0) {
+            std::cerr << "No compile commands found for " << sourceFile << std::endl;
+            return false;
+        }
 
         CXCompileCommand compileCommand = clang_CompileCommands_getCommand(compileCommands, 0);
         size_t numArguments = clang_CompileCommand_getNumArgs(compileCommand);
         char **arguments = new char *[numArguments];
 
+        std::cout << "Compile commands:";
         for (size_t i = 0; i < numArguments; i++) {
             CXString argument = clang_CompileCommand_getArg(compileCommand, i);
             std::string strArgument = clang_getCString(argument);
@@ -64,8 +93,13 @@ struct Unfuckifier {
 
             std::copy(strArgument.begin(), strArgument.end(), arguments[i]);
 
+            std::cout << " " << arguments[i] << std::flush;
+
             clang_disposeString(argument);
         }
+        std::cout << std::endl;
+        //clang_CompileCommands_dispose(compileCommands);
+        //clang_CompilationDatabase_dispose(compilationDatabase);
 
         CXIndex index = clang_createIndex(
                             0,
@@ -73,7 +107,7 @@ struct Unfuckifier {
                         );
 
         // Need to use the full argv thing for clang to pick up default paths
-        clang_parseTranslationUnit2FullArgv(
+        CXErrorCode parseError = clang_parseTranslationUnit2FullArgv(
             index,
             0,
             arguments,
@@ -84,15 +118,38 @@ struct Unfuckifier {
             &translationUnit
         );
 
+        if (parseError != CXError_Success) {
+            std::cerr << "Failed to parse " << sourceFile << ": ";
+            switch(parseError) {
+            case CXError_Failure:
+                std::cerr << "Generic unknown error (clang doesn't tell me more)" << std::endl;
+                break;
+            case CXError_Crashed:
+                std::cerr << "libclang crashed (then how did it return this to me?)" << std::endl;
+                break;
+            case CXError_InvalidArguments:
+                std::cerr << "Invalid arguments passed to parser (blame me)" << std::endl;
+                break;
+            case CXError_ASTReadError:
+                std::cerr << "AST deserialization error (should never happen, I don't use it)" << std::endl;
+                break;
+            default:
+                std::cerr << "Unknown error " << parseError << std::endl;
+                break;
+            }
+            return false;
+        }
 
-        if (translationUnit == nullptr) {
-            qWarning() << "Unable to parse translation unit. Quitting.";
+
+        if (!translationUnit) {
+            std::cerr << "Unable to parse translation unit. Quitting." << std::endl;
             return false;
         }
 
         // auto for testing
         auto cursor = clang_getTranslationUnitCursor(translationUnit);
         clang_visitChildren(cursor, &Unfuckifier::visitChild, this);
+        std::cout << "Visited " << childrenVisited << " AST nodes" << std::endl;
 
         for (size_t i = 0; i < numArguments; i++) {
             delete[] arguments[i];
@@ -101,11 +158,16 @@ struct Unfuckifier {
         delete[] arguments;
         clang_disposeIndex(index);
 
-        return fixFile("/home/sandsmark/src/unfuckify/main.cpp");
+        return true;
     }
 
     bool fixFile(const std::string &filePath)
     {
+        if (replacements.empty()) {
+            std::cerr << "Nothing to fix" << std::endl;
+            return false;
+        }
+
         FILE *file = fopen(filePath.c_str(), "r");
 
         if (!file) {
@@ -155,6 +217,7 @@ struct Unfuckifier {
     static CXChildVisitResult visitChild(CXCursor cursor, CXCursor parent, CXClientData client_data)
     {
         Unfuckifier *that = reinterpret_cast<Unfuckifier *>(client_data);
+        that->childrenVisited++;
 
         CXSourceLocation loc = clang_getCursorLocation(cursor);
 
@@ -169,6 +232,7 @@ struct Unfuckifier {
         // TODO: this just picks up `auto foo = bar()`, to handle `auto foo = 0`
         // we need to drop the parent-parent stuff I think
         if (clang_getCursorKind(parent) == CXCursor_CallExpr && clang_getCursorType(parent).kind == CXType_Auto) {
+            std::cout << "Found auto" << std::endl;
             unsigned numTokens;
             CXToken *tokens = nullptr;
             clang_tokenize(that->translationUnit, clang_getCursorExtent(clang_getCursorSemanticParent(parent)), &tokens, &numTokens);
@@ -216,38 +280,54 @@ struct Unfuckifier {
     std::vector<Replacement> replacements;
 
     CXTranslationUnit translationUnit;
+    int childrenVisited = 0;
 };
+
+static void printUsage(const std::string &executable)
+{
+    std::cerr << "Please pass a compile_commands.json and a source file to fix" << std::endl;
+    std::cerr << executable << " path/to/compile_commands.json path/to/heretical.cpp" << std::endl;
+    std::cerr << "To create a compilation database run cmake with '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON' on the project you're going to fix" << std::endl;
+}
 
 int main(int argc, char *argv[])
 {
-    QCoreApplication a(argc, argv);
-
-    const QStringList arguments = a.arguments();
-
-    if (arguments.count() < 3) {
-        qWarning() << "Please pass a compile_commands.json and a source file to fix";
+    if (argc < 3) {
+        printUsage(argv[0]);
         return 1;
     }
 
-    QFileInfo fileInfo(argv[1]);
-
-    if (!fileInfo.exists() || !QFileInfo::exists(argv[2])) {
-    qWarning() << "files do not exist";
+    std::filesystem::path compileDbPath(argv[1]);
+    if (!std::filesystem::exists(compileDbPath)) {
+        std::cerr << argv[1] << " does not exist" << std::endl;
+        printUsage(argv[0]);
         return 1;
     }
 
-    //Mocker mocker(fileInfo.baseName().toStdString());
+    if (compileDbPath.filename() != "compile_commands.json") {
+        std::cerr << argv[1] << " is not a compile_commands.json file" << std::endl;
+        printUsage(argv[0]);
+        return 1;
+    }
+    compileDbPath.remove_filename();
+
+    std::filesystem::path sourceFile(argv[2]);
+    if (!std::filesystem::exists(sourceFile)) {
+        std::cerr << "source file " << sourceFile << " does not exist" << std::endl;
+        printUsage(argv[0]);
+        return 1;
+    }
+    sourceFile = std::filesystem::absolute(sourceFile);
+
     Unfuckifier fixer;
 
-    if (fileInfo.fileName() == "compile_commands.json") {
-    std::cout << "Using compile_commands" << std::endl;
+    if (!fixer.process(compileDbPath.string(), sourceFile.string())) {
+        std::cerr << "Failed to parse process " << sourceFile << std::endl;
+        return 1;
+    }
 
-    if (!fixer.parseCompileDatabase(fileInfo, argv[2])) {
-            std::cerr << "Failed to parse " << argv[1] << std::endl;
-            return 1;
-        }
-    } else {
-        qWarning() << "invalid name";
+    if (!fixer.fixFile(sourceFile)) {
+        std::cerr << "Failed to fix " << sourceFile << std::endl;
         return 1;
     }
 

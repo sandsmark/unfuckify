@@ -6,6 +6,5 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 project(unfuckify)
 find_package(Clang REQUIRED)
-find_package(Qt5 REQUIRED COMPONENTS Core)
 add_executable(unfuckify main.cpp)
-target_link_libraries(unfuckify libclang Qt5::Core)
+target_link_libraries(unfuckify libclang)
