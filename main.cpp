@@ -199,6 +199,8 @@ struct Unfuckifier {
             return false;
         }
 
+        const std::string outFilePath = filePath + "-fixed";
+
         FILE *file = fopen(filePath.c_str(), "r");
 
         if (!file) {
@@ -210,7 +212,7 @@ struct Unfuckifier {
         const long fileSize = ftell(file);
         fseek(file, 0, SEEK_SET);
 
-        FILE *outFile = fopen((filePath + "-fixed").c_str(), "w");
+        FILE *outFile = fopen(outFilePath.c_str(), "w");
 
         if (!outFile) {
             std::cerr << "Failed to open out file " << filePath << std::endl;
@@ -241,6 +243,17 @@ struct Unfuckifier {
 
         fclose(file);
         fclose(outFile);
+
+        if (!replaceFile) {
+            return true;
+        }
+
+        const std::filesystem::path backupFilePath = filePath + ".backup";
+        if (std::filesystem::exists(backupFilePath)) {
+            std::filesystem::remove(backupFilePath);
+        }
+        std::filesystem::rename(filePath, backupFilePath);
+        std::filesystem::rename(outFilePath, filePath);
 
         return true;
     }
