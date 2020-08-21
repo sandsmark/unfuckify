@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <vector>
 
+#include <cstring>
 
 extern "C" {
 #include <clang-c/Index.h>
@@ -76,17 +77,13 @@ struct Unfuckifier {
         }
 
         CXCompileCommand compileCommand = clang_CompileCommands_getCommand(compileCommands, 0);
-        size_t numArguments = clang_CompileCommand_getNumArgs(compileCommand);
-        char **arguments = new char *[numArguments];
+
+        std::vector<char*> arguments(clang_CompileCommand_getNumArgs(compileCommand));
 
         std::cout << "Compile commands:";
-        for (size_t i = 0; i < numArguments; i++) {
+        for (size_t i = 0; i < arguments.size(); i++) {
             CXString argument = clang_CompileCommand_getArg(compileCommand, i);
-            std::string strArgument = clang_getCString(argument);
-            arguments[i] = new char[ strArgument.size() + 1 ];
-            std::fill(arguments[i], arguments[i] + strArgument.size() + 1, 0);
-
-            std::copy(strArgument.begin(), strArgument.end(), arguments[i]);
+            arguments[i] = strdup(clang_getCString(argument));
 
             std::cout << " " << arguments[i] << std::flush;
 
@@ -105,8 +102,8 @@ struct Unfuckifier {
         CXErrorCode parseError = clang_parseTranslationUnit2FullArgv(
             index,
             0,
-            arguments,
-            numArguments,
+            arguments.data(),
+            arguments.size(),
             nullptr,
             0,
             CXTranslationUnit_None, // flags
@@ -162,11 +159,10 @@ struct Unfuckifier {
         }
         clang_disposeTokens(translationUnit, tokens, numTokens);
 
-        for (size_t i = 0; i < numArguments; i++) {
-            delete[] arguments[i];
+        for (size_t i = 0; i < arguments.size(); i++) {
+            free(arguments[i]);
         }
 
-        delete[] arguments;
         clang_disposeIndex(index);
         clang_disposeTranslationUnit(translationUnit);
 
