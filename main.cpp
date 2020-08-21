@@ -28,7 +28,7 @@ std::string getString(const CXString &str)
 }
 
 struct Unfuckifier {
-    void handleAutoToken(CXToken *autoToken)
+    void handleAutoToken(CXToken *autoToken, CXTranslationUnit translationUnit)
     {
         CXCursor cursor;
         clang_annotateTokens(translationUnit, autoToken, 1, &cursor);
@@ -45,12 +45,10 @@ struct Unfuckifier {
         replacements.push_back(std::move(replacement));
     }
 
-    bool process(const std::string &compilePath, const std::string &sourceFile)
+    bool parseCompilationDatabase(const std::string &compilePath)
     {
-        std::cout << "Processing " << sourceFile << std::endl;
-
         CXCompilationDatabase_Error compilationDatabaseError;
-        CXCompilationDatabase compilationDatabase = clang_CompilationDatabase_fromDirectory(
+        compilationDatabase = clang_CompilationDatabase_fromDirectory(
                     compilePath.c_str(),
                     &compilationDatabaseError
                 );
@@ -59,6 +57,34 @@ struct Unfuckifier {
             std::cerr << "Failed to load " << compilePath << "(err " << compilationDatabaseError << ")" << std::endl;
             return false;
         }
+        return true;
+    }
+
+    std::vector<std::string> allAvailableFiles()
+    {
+        std::vector<std::string> files;
+
+        CXCompileCommands compileCommands = clang_CompilationDatabase_getAllCompileCommands(compilationDatabase);
+        const size_t numCompileCommands = clang_CompileCommands_getSize(compileCommands);
+        if (numCompileCommands == 0) {
+            std::cerr << "No compile commands found" << std::endl;
+            return {};
+        }
+        for (size_t i=0; i<numCompileCommands; i++) {
+            CXCompileCommand compileCommand = clang_CompileCommands_getCommand(compileCommands, i);
+            files.push_back(getString(clang_CompileCommand_getFilename(compileCommand)));
+        }
+        clang_CompileCommands_dispose(compileCommands);
+        return files;
+    }
+
+    ~Unfuckifier() {
+        clang_CompilationDatabase_dispose(compilationDatabase);
+    }
+
+    bool process(const std::string &sourceFile)
+    {
+        std::cout << "Processing " << sourceFile << std::endl;
 
         CXCompileCommands compileCommands = clang_CompilationDatabase_getCompileCommands(
                                                 compilationDatabase,
@@ -66,17 +92,13 @@ struct Unfuckifier {
                                             );
 
         if (!compileCommands) {
-            std::cerr << "Failed to find compile command for " << sourceFile << " in " << compilePath << std::endl;
+            std::cerr << "Failed to find compile command for " << sourceFile << std::endl;
             return false;
         }
 
-        size_t numCompileCommands = clang_CompileCommands_getSize(compileCommands);
-        if (numCompileCommands == 0) {
-            std::cerr << "No compile commands found for " << sourceFile << std::endl;
-            return false;
-        }
 
         CXCompileCommand compileCommand = clang_CompileCommands_getCommand(compileCommands, 0);
+        std::cout << clang_CompileCommand_getFilename(compileCommand) << std::endl;
 
         std::vector<char*> arguments(clang_CompileCommand_getNumArgs(compileCommand));
 
@@ -91,12 +113,13 @@ struct Unfuckifier {
         }
         std::cout << std::endl;
         clang_CompileCommands_dispose(compileCommands);
-        clang_CompilationDatabase_dispose(compilationDatabase);
 
         CXIndex index = clang_createIndex(
                             0,
                             1 // Print warnings and errors
                         );
+
+        CXTranslationUnit translationUnit{};
 
         // Need to use the full argv thing for clang to pick up default paths
         CXErrorCode parseError = clang_parseTranslationUnit2FullArgv(
@@ -154,7 +177,7 @@ struct Unfuckifier {
             }
 
             if (getString(clang_getTokenSpelling(translationUnit, tokens[i])) == "auto") {
-                handleAutoToken(&tokens[i]);
+                handleAutoToken(&tokens[i], translationUnit);
             }
         }
         clang_disposeTokens(translationUnit, tokens, numTokens);
@@ -166,7 +189,7 @@ struct Unfuckifier {
         clang_disposeIndex(index);
         clang_disposeTranslationUnit(translationUnit);
 
-        return true;
+        return fixFile(sourceFile);
     }
 
     bool fixFile(const std::string &filePath)
@@ -227,15 +250,17 @@ struct Unfuckifier {
         std::string string;
     };
     std::vector<Replacement> replacements;
+    bool replaceFile = false;
 
-    CXTranslationUnit translationUnit;
+    CXCompilationDatabase compilationDatabase{};
     int childrenVisited = 0;
 };
 
 static void printUsage(const std::string &executable)
 {
-    std::cerr << "Please pass a compile_commands.json and a source file to fix" << std::endl;
-    std::cerr << executable << " path/to/compile_commands.json path/to/heretical.cpp" << std::endl;
+    std::cerr << "Please pass a compile_commands.json and a source file, or --all to fix all files in project" << std::endl;
+    std::cerr << "To replace the existing files pass --replace" << std::endl;
+    std::cerr << executable << " path/to/compile_commands.json [--replace] [--all] [path/to/heretical.cpp]" << std::endl;
     std::cerr << "To create a compilation database run cmake with '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON' on the project you're going to fix" << std::endl;
 }
 
@@ -246,38 +271,65 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    std::filesystem::path compileDbPath(argv[1]);
-    if (!std::filesystem::exists(compileDbPath)) {
-        std::cerr << argv[1] << " does not exist" << std::endl;
-        printUsage(argv[0]);
-        return 1;
+    std::filesystem::path compileDbPath;
+    std::filesystem::path sourceFile;
+
+    Unfuckifier fixer;
+    bool all = false;
+    for (int argNum = 1; argNum < argc; argNum++) {
+        const std::string arg = argv[argNum];
+        std::cout << arg << std::endl;
+
+        if (arg == "--all") {
+            all = true;
+            continue;
+        }
+
+        if (arg == "--replace") {
+            fixer.replaceFile = true;
+            continue;
+        }
+        std::filesystem::path path(arg);
+        if (!std::filesystem::exists(path)) {
+            continue;
+        }
+        if (path.filename() == "compile_commands.json") {
+            compileDbPath = path;
+            continue;
+        }
+        sourceFile = path;
     }
 
-    if (compileDbPath.filename() != "compile_commands.json") {
-        std::cerr << argv[1] << " is not a compile_commands.json file" << std::endl;
+    if (compileDbPath.empty() || !std::filesystem::exists(compileDbPath)) {
+        std::cerr << "Please pass path to a compile_commands.json file" << std::endl;
         printUsage(argv[0]);
         return 1;
     }
     compileDbPath.remove_filename();
+    std::cout << "WAnted all" << std::endl;
 
-    std::filesystem::path sourceFile(argv[2]);
-    if (!std::filesystem::exists(sourceFile)) {
-        std::cerr << "source file " << sourceFile << " does not exist" << std::endl;
-        printUsage(argv[0]);
-        return 1;
-    }
-    sourceFile = std::filesystem::absolute(sourceFile);
+    fixer.parseCompilationDatabase(compileDbPath.string());
 
-    Unfuckifier fixer;
+    if (all) {
+        for (const std::string &file : fixer.allAvailableFiles()) {
+            if (!fixer.process(file)) {
+                std::cerr << "Failed to process " << sourceFile << std::endl;
+                return 1;
+            }
+        }
+    } else {
+        if (sourceFile.empty() || !std::filesystem::exists(sourceFile)) {
+            std::cerr << "Please pass a path to a source file" << std::endl;
+            printUsage(argv[0]);
+            return 1;
+        }
 
-    if (!fixer.process(compileDbPath.string(), sourceFile.string())) {
-        std::cerr << "Failed to process " << sourceFile << std::endl;
-        return 1;
-    }
+        sourceFile = std::filesystem::absolute(sourceFile);
 
-    if (!fixer.fixFile(sourceFile)) {
-        std::cerr << "Failed to fix " << sourceFile << std::endl;
-        return 1;
+        if (!fixer.process(sourceFile.string())) {
+            std::cerr << "Failed to process " << sourceFile << std::endl;
+            return 1;
+        }
     }
 
     return 0;
