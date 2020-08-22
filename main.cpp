@@ -39,6 +39,7 @@ struct Unfuckifier {
         clang_annotateTokens(translationUnit, autoToken, 1, &cursor);
 
         CXType type = clang_getCursorType(cursor);
+        CXType pointerType = clang_getPointeeType(type);
 
         // In case of pointers, clang is a bit confused with 'auto *'  and
         // gives us 'foo *' instead of just 'foo', but the token extent covers
@@ -129,8 +130,18 @@ struct Unfuckifier {
         for (size_t i=0; i<numCompileCommands; i++) {
             CXCompileCommand compileCommand = clang_CompileCommands_getCommand(compileCommands, i);
             std::string filename = getString(clang_CompileCommand_getFilename(compileCommand));
+
+            if (skipBuildDir) {
+                std::string buildDir = getString(clang_CompileCommand_getDirectory(compileCommand));
+                if (filename.find(buildDir) == 0) {
+                    if (verbose) std::cout << "Skipping generated " << filename << std::endl;
+                    else std::cout << "Skipping generated " << std::filesystem::path(filename).filename() << std::endl;
+                    continue;
+                }
+            }
             if (!std::filesystem::exists(filename)) {
-                std::cerr << filename << " does not exist, skipping" << std::endl;
+                if (verbose) std::cout << "Skipping nonexistent " << filename << std::endl;
+                else std::cout << "Skipping nonexistent " << std::filesystem::path(filename).filename() << std::endl;
                 continue;
             }
             files.push_back(filename);
@@ -145,7 +156,10 @@ struct Unfuckifier {
 
     bool process(const std::string &sourceFile)
     {
-        std::cout << "Processing " << sourceFile << std::endl;
+        std::cout << "Processing ";
+        if (verbose) std::cout << sourceFile;
+        else std::cout << std::filesystem::path(sourceFile).filename();
+        std::cout << "... " << std::flush;
 
         CXCompileCommands compileCommands = clang_CompilationDatabase_getCompileCommands(
                                                 compilationDatabase,
@@ -219,7 +233,7 @@ struct Unfuckifier {
 
 
         if (!translationUnit) {
-            std::cerr << "Unable to parse translation unit. Quitting." << std::endl;
+            std::cerr << "No parse error, but didn't get a translation unit for " << sourceFile << std::endl;
             return false;
         }
 
@@ -251,6 +265,7 @@ struct Unfuckifier {
         clang_disposeTranslationUnit(translationUnit);
 
         if (replacements.empty()) {
+            std::cout << "no autos." << std::endl;
             return true;
         }
 
@@ -285,7 +300,7 @@ struct Unfuckifier {
             return false;
         }
 
-        std::cout << "Fixing " << replacements.size() << " autos" << std::endl;
+        std::cout << "found " << replacements.size() << " autos" << std::endl;
 
         std::vector<char> buffer;
         int lastPos = 0;
@@ -331,6 +346,7 @@ struct Unfuckifier {
 
     bool replaceFile = false;
     bool verbose = false;
+    bool skipBuildDir = true;
 };
 
 static void printUsage(const std::string &executable)
