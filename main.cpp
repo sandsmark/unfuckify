@@ -108,20 +108,21 @@ struct Unfuckifier {
 
 
         CXCompileCommand compileCommand = clang_CompileCommands_getCommand(compileCommands, 0);
-        std::cout << clang_CompileCommand_getFilename(compileCommand) << std::endl;
 
         std::vector<char*> arguments(clang_CompileCommand_getNumArgs(compileCommand));
 
-        std::cout << "Compile commands:";
+        if (verbose) std::cout << "Compile commands:";
         for (size_t i = 0; i < arguments.size(); i++) {
             CXString argument = clang_CompileCommand_getArg(compileCommand, i);
             arguments[i] = strdup(clang_getCString(argument));
 
-            std::cout << " " << arguments[i] << std::flush;
+            if (verbose) std::cout << " " << arguments[i] << std::flush;
 
             clang_disposeString(argument);
         }
-        std::cout << std::endl;
+
+        if (verbose) std::cout << std::endl;
+
         clang_CompileCommands_dispose(compileCommands);
 
         CXIndex index = clang_createIndex(
@@ -235,7 +236,7 @@ struct Unfuckifier {
             return false;
         }
 
-        std::cout << "fixing " << replacements.size() << std::endl;
+        if (verbose) std::cout << "Fixing " << replacements.size() << "autos" << std::endl;
 
         std::vector<char> buffer;
         int lastPos = 0;
