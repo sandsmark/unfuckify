@@ -72,6 +72,15 @@ struct Unfuckifier {
             replacement.string = replacement.string.substr(strlen("const "));
         }
 
+        // Couldn't find a way to get libclang to mush together >>, so fix the
+        // code style manually.
+        // Not the pretties way, but fuck you if you judge me for it :))
+        std::string::size_type braceSpace = replacement.string.find(" >");
+        while (braceSpace != std::string::npos) {
+            replacement.string.replace(braceSpace, strlen(" >"), ">");
+            braceSpace = replacement.string.find(" >");
+        }
+
         CXSourceRange extent = clang_getTokenExtent(translationUnit, *autoToken);
 
         const CXSourceLocation start = clang_getRangeStart(extent);
