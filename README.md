@@ -63,14 +63,19 @@ this for a distro that doesn't allow swearing:
 Known issues
 ------------
 
+`auto` is very magic and hides a _lot_ of complexity, so trying to resolve the
+actual types is hard.
+
 If libclang is unable to give a proper type for something (like lambdas), we can't replace it.
 
 There are some issues with libclang's handling of tokens vs. cursors, e. g. it
 will give us the fully qualified type (including const, \*, &, etc.), but the
 extent we get only covers `auto` itself.
 
-We should handle the cases here properly now, but no guarantees that I have catched all cases.
+We should handle the cases here properly now, but no guarantees that I have catched all cases. So make sure you review the code it changes.
 
+Cases it fails on:
+ - `auto **`
 
 TODO
 ----
