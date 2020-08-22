@@ -77,7 +77,12 @@ struct Unfuckifier {
         }
         for (size_t i=0; i<numCompileCommands; i++) {
             CXCompileCommand compileCommand = clang_CompileCommands_getCommand(compileCommands, i);
-            files.push_back(getString(clang_CompileCommand_getFilename(compileCommand)));
+            std::string filename = getString(clang_CompileCommand_getFilename(compileCommand));
+            if (!std::filesystem::exists(filename)) {
+                std::cerr << filename << " does not exist, skipping" << std::endl;
+                continue;
+            }
+            files.push_back(filename);
         }
         clang_CompileCommands_dispose(compileCommands);
         return files;
