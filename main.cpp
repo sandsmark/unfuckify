@@ -38,8 +38,36 @@ struct Unfuckifier {
         CXCursor cursor;
         clang_annotateTokens(translationUnit, autoToken, 1, &cursor);
 
+        CXType type = clang_getCursorType(cursor);
+
+        // In case of pointers, clang is a bit confused with 'auto *'  and
+        // gives us 'foo *' instead of just 'foo', but the token extent covers
+        // only 'auto' So resolve the pointer/reference type, if available, and
+        // just use that.
+        CXType pointerType = clang_getPointeeType(type);
+        if (pointerType.kind != CXType_Invalid) {
+            type = pointerType;
+        }
+
         Replacement replacement;
-        replacement.string = getString(clang_getTypeSpelling((clang_getCursorType(cursor))));
+        replacement.string = getString(clang_getTypeSpelling(type));
+
+        // Same as with pointers, the token extent only covers `auto`, but
+        // clang_getTypeSpelling() returns the whole shebang with const and &
+        // and what have you.
+        if (clang_isConstQualifiedType(type)) {
+            std::string::size_type constStart = replacement.string.find("const ");
+            if (constStart == std::string::npos) {
+                std::cerr << "Failed to find position of const!" << std::endl;
+                return {};
+            }
+            if (constStart != 0) {
+                std::cout << "unexpected position of const modifier: " << constStart << std::endl;
+                return {};
+            }
+            replacement.string = replacement.string.substr(strlen("const "));
+        }
+
         CXSourceRange extent = clang_getTokenExtent(translationUnit, *autoToken);
 
         const CXSourceLocation start = clang_getRangeStart(extent);
@@ -242,6 +270,10 @@ struct Unfuckifier {
         int lastPos = 0;
 
         for (const Replacement &replacement : replacements) {
+            if (replacement.string.empty()) {
+                if (verbose) std::cout << "Skipping empty replacement" << std::endl;
+                continue;
+            }
             buffer.resize(replacement.start - lastPos);
             fread(buffer.data(), buffer.size(), 1, file);
             fwrite(buffer.data(), buffer.size(), 1, outFile);
@@ -273,11 +305,10 @@ struct Unfuckifier {
 
         return true;
     }
-    bool replaceFile = false;
 
     CXCompilationDatabase compilationDatabase{};
-    int childrenVisited = 0;
 
+    bool replaceFile = false;
     bool verbose = false;
 };
 
@@ -331,7 +362,6 @@ int main(int argc, char *argv[])
         return 1;
     }
     compileDbPath.remove_filename();
-    std::cout << "WAnted all" << std::endl;
 
     fixer.parseCompilationDatabase(compileDbPath.string());
 
