@@ -354,6 +354,10 @@ struct Unfuckifier {
                 if (type.kind != CXType_Auto) {
                     continue;
                 }
+                const std::string typeString = getString(clang_getTypeSpelling(type));
+                if (typeString.find("const") == 0) { // idk..
+                    continue;
+                }
 
                 Replacement replacement;
                 replacement.string = "";
