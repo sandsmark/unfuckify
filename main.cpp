@@ -33,6 +33,39 @@ struct Unfuckifier {
         std::string string;
     };
 
+    bool fileContainsAuto(const std::string &filename)
+    {
+        FILE *file = fopen(filename.c_str(), "r");
+        if (!file) {
+            std::cerr << "Failed to open " << filename << " to check for auto" << std::endl;
+            return false;
+        }
+
+        fseek(file, 0, SEEK_END);
+        const long fileSize = ftell(file);
+        fseek(file, 0, SEEK_SET);
+
+        if (fileSize <= 0) {
+            fclose(file);
+            std::cerr << "Failed to get size of " << filename << " to check for auto" << std::endl;
+            return false;
+        }
+
+        std::vector<char> buffer(fileSize);
+        if (fread(buffer.data(), buffer.size(), 1, file) != 1) {
+            std::cerr << "Short read from " << filename << " when checking for auto" << std::endl;
+            fclose(file);
+            return false;
+        }
+        fclose(file);
+
+        if (!memmem(buffer.data(), buffer.size(), "auto", strlen("auto"))) {
+            return false;
+        }
+
+        return true;
+    }
+
     static Replacement handleAutoToken(CXToken *autoToken, CXTranslationUnit translationUnit)
     {
         CXCursor cursor;
@@ -93,7 +126,6 @@ struct Unfuckifier {
             std::cerr << " !! Horribly broken crap, please rewrite manually by splitting out into functions" << std::endl;
             std::cerr << " -> Starts at " << clang_getFileName(fileStart) << ":" << lineStart << std::endl;
             std::cerr << " <- Ends at " << clang_getFileName(fileEnd) << ":" << lineEnd << std::endl;
-            std::cerr << std::endl;
             return {};
         }
 
@@ -164,9 +196,16 @@ struct Unfuckifier {
 
     bool process(const std::string &sourceFile)
     {
+        const std::string filename = std::filesystem::path(sourceFile).filename();
+        // Quickly scan the file to see if it contains the string "auto"
+        if (!fileContainsAuto(sourceFile)) {
+            std::cout << filename << " does not contain 'auto'" << std::endl;
+            return true;
+        }
+
         std::cout << "Processing ";
         if (verbose) std::cout << sourceFile;
-        else std::cout << std::filesystem::path(sourceFile).filename();
+        else std::cout << filename;
         std::cout << "... " << std::flush;
 
         CXCompileCommands compileCommands = clang_CompilationDatabase_getCompileCommands(
