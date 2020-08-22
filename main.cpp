@@ -66,13 +66,32 @@ struct Unfuckifier {
         return true;
     }
 
-    static Replacement handleAutoToken(CXToken *autoToken, CXTranslationUnit translationUnit)
+    Replacement handleAutoToken(CXToken *autoToken, CXTranslationUnit translationUnit)
     {
         CXCursor cursor;
         clang_annotateTokens(translationUnit, autoToken, 1, &cursor);
 
         CXType type = clang_getCursorType(cursor);
         CXType pointerType = clang_getPointeeType(type);
+
+        if (dumpNodes) {
+            std::cout << " > type " << clang_getTypeSpelling(type) << std::endl;
+            std::cout << " > kind " << clang_getTypeKindSpelling(type.kind) << std::endl;
+            std::cout << " > cursor kind " << clang_getCursorKindSpelling(cursor.kind) << std::endl;
+            std::cout << " > pointer type " << clang_getTypeSpelling(pointerType) << std::endl;
+
+            CXSourceRange extent = clang_getCursorExtent(cursor);
+            const CXSourceLocation start = clang_getRangeStart(extent);
+            const CXSourceLocation end = clang_getRangeEnd(extent);
+            unsigned lineStart, lineEnd;
+            unsigned colStart, colEnd;
+            CXFile fileStart, fileEnd;
+            clang_getSpellingLocation(start, &fileStart, &lineStart, &colStart, nullptr);
+            clang_getSpellingLocation(end, &fileEnd, &lineEnd, &colEnd, nullptr);
+
+            std::cerr << " > Starts at " << clang_getFileName(fileStart) << ":" << lineStart << ":" << colStart << std::endl;
+            std::cerr << " > Ends at " << clang_getFileName(fileEnd) << ":" << lineEnd << ":" << colEnd << std::endl;
+        }
 
         // In case of pointers, clang is a bit confused with 'auto *'  and
         // gives us 'foo *' instead of just 'foo', but the token extent covers
@@ -293,17 +312,54 @@ struct Unfuckifier {
         clang_tokenize(translationUnit, clang_getCursorExtent(cursor), &tokens, &numTokens);
 
         std::vector<Replacement> replacements;
+        bool prevWasAuto = false;
         for (unsigned i = 0; i < numTokens; i++) {
             if (dumpNodes) {
-                std::cout << "Token: " << clang_getTokenSpelling(translationUnit, tokens[i]) << std::endl;
+                std::cout << "\n - Token: " << clang_getTokenSpelling(translationUnit, tokens[i]) << std::endl;
+                std::cout << " - token kind: " << clang_getTokenKind(tokens[i]) << std::endl;
 
                 CXCursor cursor;
                 clang_annotateTokens(translationUnit, &tokens[i], 1, &cursor);
                 CXType type = clang_getCursorType(cursor);
-                std::cout << "type " << clang_getTypeSpelling(type) << std::endl;
-                std::cout << "kind " << clang_getTypeKindSpelling(type.kind) << std::endl;
-                std::cout << "cursor kind " << clang_getCursorKindSpelling(cursor.kind) << std::endl;
+                std::cout << " - type " << clang_getTypeSpelling(type) << std::endl;
+                std::cout << " - kind " << clang_getTypeKindSpelling(type.kind) << std::endl;
+                std::cout << " - cursor kind " << clang_getCursorKindSpelling(cursor.kind) << std::endl;
+                std::cout << " - cursor type kind " << clang_getTypeKindSpelling(type.kind) << std::endl;
             }
+
+            // Handle auto&& crap
+            if (prevWasAuto && clang_getTokenKind(tokens[i]) != CXToken_Keyword && getString(clang_getTokenSpelling(translationUnit, tokens[i])) == "&&") {
+                prevWasAuto = false;
+
+                CXCursor cursor;
+                clang_annotateTokens(translationUnit, &tokens[i], 1, &cursor);
+                if (cursor.kind != CXCursor_VarDecl) {
+                    continue;
+                }
+
+                CXType type = clang_getCursorType(cursor);
+                if (type.kind != CXType_LValueReference) {
+                    std::cerr << "TODO" << std::endl;
+                    std::cout << " - type " << clang_getTypeSpelling(type) << std::endl;
+                    std::cout << " - kind " << clang_getTypeKindSpelling(type.kind) << std::endl;
+                    std::cout << " - cursor kind " << clang_getCursorKindSpelling(cursor.kind) << std::endl;
+                    std::cout << " - cursor type kind " << clang_getTypeKindSpelling(type.kind) << std::endl;
+                    continue;
+                }
+
+                Replacement replacement;
+                replacement.string = "&";
+
+                CXSourceRange extent = clang_getTokenExtent(translationUnit, tokens[i]);
+                const CXSourceLocation start = clang_getRangeStart(extent);
+                const CXSourceLocation end = clang_getRangeEnd(extent);
+                clang_getSpellingLocation(start, nullptr, nullptr, nullptr, &replacement.start);
+                clang_getSpellingLocation(end, nullptr, nullptr, nullptr, &replacement.end);
+                replacements.push_back(replacement);
+
+                continue;
+            }
+            prevWasAuto = false;
 
             if (clang_getTokenKind(tokens[i]) != CXToken_Keyword) {
                 continue;
@@ -315,6 +371,7 @@ struct Unfuckifier {
                     continue;
                 }
                 replacements.push_back(replacement);
+                prevWasAuto = true;
             }
         }
         clang_disposeTokens(translationUnit, tokens, numTokens);
@@ -413,10 +470,10 @@ struct Unfuckifier {
         int lastPos = 0;
 
         for (const Replacement &replacement : replacements) {
-            if (replacement.string.empty()) {
-                if (verbose) std::cout << "Skipping empty replacement" << std::endl;
-                continue;
-            }
+            //if (replacement.string.empty()) {
+            //    if (verbose) std::cout << "Skipping empty replacement" << std::endl;
+            //    continue;
+            //}
             buffer.resize(replacement.start - lastPos);
             fread(buffer.data(), buffer.size(), 1, file);
             fwrite(buffer.data(), buffer.size(), 1, outFile);
