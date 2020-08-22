@@ -123,13 +123,29 @@ struct Unfuckifier {
             std::string::size_type constStart = replacement.string.find("const ");
             if (constStart == std::string::npos) {
                 std::cerr << "Failed to find position of const!" << std::endl;
-                return {};
-            }
-            if (constStart != 0) {
+                std::cout << " > type " << clang_getTypeSpelling(type) << std::endl;
+                std::cout << " > kind " << clang_getTypeKindSpelling(type.kind) << std::endl;
+                std::cout << " > cursor kind " << clang_getCursorKindSpelling(cursor.kind) << std::endl;
+                std::cout << " > pointer type " << clang_getTypeSpelling(pointerType) << std::endl;
+                std::cout << " > pointer type is const " << clang_isConstQualifiedType(pointerType) << std::endl;
+
+                CXSourceRange extent = clang_getCursorExtent(cursor);
+                const CXSourceLocation start = clang_getRangeStart(extent);
+                const CXSourceLocation end = clang_getRangeEnd(extent);
+                unsigned lineStart, lineEnd;
+                unsigned colStart, colEnd;
+                CXFile fileStart, fileEnd;
+                clang_getSpellingLocation(start, &fileStart, &lineStart, &colStart, nullptr);
+                clang_getSpellingLocation(end, &fileEnd, &lineEnd, &colEnd, nullptr);
+
+                std::cerr << " > Starts at " << clang_getFileName(fileStart) << ":" << lineStart << ":" << colStart << std::endl;
+                std::cerr << " > Ends at " << clang_getFileName(fileEnd) << ":" << lineEnd << ":" << colEnd << std::endl;
+            } else if (constStart != 0) {
                 std::cout << "unexpected position of const modifier: " << constStart << std::endl;
                 return {};
+            } else {
+                replacement.string = replacement.string.substr(strlen("const "));
             }
-            replacement.string = replacement.string.substr(strlen("const "));
         }
 
         if (replacement.string.find("(lambda at ") != std::string::npos) {
