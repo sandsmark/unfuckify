@@ -44,9 +44,13 @@ struct Unfuckifier {
         // gives us 'foo *' instead of just 'foo', but the token extent covers
         // only 'auto' So resolve the pointer/reference type, if available, and
         // just use that.
-        CXType pointerType = clang_getPointeeType(type);
-        if (pointerType.kind != CXType_Invalid) {
-            type = pointerType;
+        if (type.kind == CXType_Pointer || type.kind == CXType_RValueReference || type.kind == CXType_LValueReference) {
+            CXType pointerType = clang_getPointeeType(type);
+            if (pointerType.kind != CXType_Invalid) {
+                type = pointerType;
+            } else {
+                std::cerr << "Got invalid pointer type" << std::endl;
+            }
         }
 
         Replacement replacement;
@@ -264,7 +268,7 @@ struct Unfuckifier {
             return false;
         }
 
-        if (verbose) std::cout << "Fixing " << replacements.size() << "autos" << std::endl;
+        std::cout << "Fixing " << replacements.size() << " autos" << std::endl;
 
         std::vector<char> buffer;
         int lastPos = 0;
