@@ -75,7 +75,8 @@ extent we get only covers `auto` itself.
 We should handle the cases here properly now, but no guarantees that I have catched all cases. So make sure you review the code it changes.
 
 Cases it fails on:
- - `auto **`
+ - Some extremely magic function pointer stuff. I don't really know myself what
+   the people who wrote it are trying to do, so I don't blame clang.
 
 TODO
 ----

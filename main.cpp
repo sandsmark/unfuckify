@@ -97,7 +97,7 @@ struct Unfuckifier {
         // gives us 'foo *' instead of just 'foo', but the token extent covers
         // only 'auto' So resolve the pointer/reference type, if available, and
         // just use that.
-        if (type.kind == CXType_Pointer || type.kind == CXType_RValueReference || type.kind == CXType_LValueReference) {
+        while (type.kind == CXType_Pointer || type.kind == CXType_RValueReference || type.kind == CXType_LValueReference) {
             CXType pointerType = clang_getPointeeType(type);
             if (pointerType.kind != CXType_Invalid) {
                 type = pointerType;
