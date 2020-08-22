@@ -330,6 +330,8 @@ struct Unfuckifier {
         std::vector<Replacement> replacements;
         bool prevWasAuto = false;
         for (unsigned i = 0; i < numTokens; i++) {
+            const std::string tokenString = getString(clang_getTokenSpelling(translationUnit, tokens[i]));
+
             if (dumpNodes) {
                 std::cout << "\n - Token: " << clang_getTokenSpelling(translationUnit, tokens[i]) << std::endl;
                 std::cout << " - token kind: " << clang_getTokenKind(tokens[i]) << std::endl;
@@ -343,8 +345,31 @@ struct Unfuckifier {
                 std::cout << " - cursor type kind " << clang_getTypeKindSpelling(type.kind) << std::endl;
             }
 
+            // Handle "const auto" shit pointers
+            if (tokenString == "const") {
+                CXCursor cursor;
+                clang_annotateTokens(translationUnit, &tokens[i], 1, &cursor);
+                CXType type = clang_getCursorType(cursor);
+
+                if (type.kind != CXType_Auto) {
+                    continue;
+                }
+
+                Replacement replacement;
+                replacement.string = "";
+
+                CXSourceRange extent = clang_getTokenExtent(translationUnit, tokens[i]);
+                const CXSourceLocation start = clang_getRangeStart(extent);
+                const CXSourceLocation end = clang_getRangeEnd(extent);
+                clang_getSpellingLocation(start, nullptr, nullptr, nullptr, &replacement.start);
+                clang_getSpellingLocation(end, nullptr, nullptr, nullptr, &replacement.end);
+                replacements.push_back(replacement);
+
+                continue;
+            }
+
             // Handle auto&& crap
-            if (prevWasAuto && clang_getTokenKind(tokens[i]) != CXToken_Keyword && getString(clang_getTokenSpelling(translationUnit, tokens[i])) == "&&") {
+            if (prevWasAuto && clang_getTokenKind(tokens[i]) != CXToken_Keyword && tokenString == "&&") {
                 prevWasAuto = false;
 
                 CXCursor cursor;
@@ -381,7 +406,7 @@ struct Unfuckifier {
                 continue;
             }
 
-            if (getString(clang_getTokenSpelling(translationUnit, tokens[i])) == "auto") {
+            if (tokenString == "auto") {
                 Replacement replacement = handleAutoToken(&tokens[i], translationUnit);
                 if (replacement.string.empty()) {
                     continue;
