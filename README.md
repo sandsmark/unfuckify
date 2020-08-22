@@ -29,6 +29,7 @@ to replace the existing file.
 This uses libclang to parse and resolve the types, so if your project builds
 with clang this should work as well.
 
+
 Example
 -------
 
@@ -36,4 +37,24 @@ In a random CMake based project:
  - `mkdir build && cd build`
  - `CC="clang" CXX="clang++" cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -GNinja ..`
  - `ninja` (to make sure generated files are available)
- - `unfuckify compile_commands.json ../src/main.cpp`
+ - `unfuckify --replace compile_commands.json ../src/main.cpp`
+
+
+Why the offensive name
+----------------------
+
+Like all great projects this was written in a moment of frustration and anger.
+
+Official upstream suggestions for alternative names, if you want to package
+this for a distro that doesn't allow swearing:
+ - Antonyms of autonomy (courtesy of wordhippo.com):
+    - Heteronomy
+    - Bondage
+    - Subservience
+    - Subjugation
+    - Other BDSM terms, apparently
+ - Auto Annihilator
+ - Auto-b-Gone
+ - auto-was-a-mistake-please-help
+ - N1984, The Name Should Have Given It Away
+ - no-n1984
