@@ -29,3 +29,11 @@ to replace the existing file.
 This uses libclang to parse and resolve the types, so if your project builds
 with clang this should work as well.
 
+Example
+-------
+
+In a random CMake based project:
+ - `mkdir build && cd build`
+ - `CC="clang" CXX="clang++" cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -GNinja ..`
+ - `ninja` (to make sure generated files are available)
+ - `unfuckify compile_commands.json ../src/main.cpp`
