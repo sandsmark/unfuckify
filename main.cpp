@@ -61,10 +61,8 @@ struct Unfuckifier {
 
         const CXSourceLocation start = clang_getRangeStart(extent);
         const CXSourceLocation end = clang_getRangeEnd(extent);
-        unsigned lineStart, lineEnd;
-        CXFile fileStart, fileEnd;
-        clang_getSpellingLocation(start, &fileStart, &lineStart, nullptr, &replacement.start);
-        clang_getSpellingLocation(end, &fileEnd, &lineEnd, nullptr, &replacement.end);
+        clang_getSpellingLocation(start, nullptr, nullptr, nullptr, &replacement.start);
+        clang_getSpellingLocation(end, nullptr, nullptr, nullptr, &replacement.end);
 
         // Same as with pointers, the token extent only covers `auto`, but
         // clang_getTypeSpelling() returns the whole shebang with const and &
@@ -83,9 +81,19 @@ struct Unfuckifier {
         }
 
         if (replacement.string.find("(lambda at ") != std::string::npos) {
+            extent = clang_getCursorExtent(cursor);
+            const CXSourceLocation start = clang_getRangeStart(extent);
+            const CXSourceLocation end = clang_getRangeEnd(extent);
+            unsigned lineStart, lineEnd;
+            CXFile fileStart, fileEnd;
+            clang_getSpellingLocation(start, &fileStart, &lineStart, nullptr, nullptr);
+            clang_getSpellingLocation(end, &fileEnd, &lineEnd, nullptr, nullptr);
+
+            std::cerr << std::endl;
             std::cerr << " !! Horribly broken crap, please rewrite manually by splitting out into functions" << std::endl;
             std::cerr << " -> Starts at " << clang_getFileName(fileStart) << ":" << lineStart << std::endl;
             std::cerr << " <- Ends at " << clang_getFileName(fileEnd) << ":" << lineEnd << std::endl;
+            std::cerr << std::endl;
             return {};
         }
 
@@ -247,18 +255,37 @@ struct Unfuckifier {
 
         std::vector<Replacement> replacements;
         for (unsigned i = 0; i < numTokens; i++) {
+            if (dumpNodes) {
+                std::cout << "Token: " << clang_getTokenSpelling(translationUnit, tokens[i]) << std::endl;
+
+                CXCursor cursor;
+                clang_annotateTokens(translationUnit, &tokens[i], 1, &cursor);
+                CXType type = clang_getCursorType(cursor);
+                std::cout << "type " << clang_getTypeSpelling(type) << std::endl;
+                std::cout << "kind " << clang_getTypeKindSpelling(type.kind) << std::endl;
+                std::cout << "cursor kind " << clang_getCursorKindSpelling(cursor.kind) << std::endl;
+            }
+
             if (clang_getTokenKind(tokens[i]) != CXToken_Keyword) {
                 continue;
             }
 
             if (getString(clang_getTokenSpelling(translationUnit, tokens[i])) == "auto") {
-                replacements.push_back(handleAutoToken(&tokens[i], translationUnit));
+                Replacement replacement = handleAutoToken(&tokens[i], translationUnit);
+                if (replacement.string.empty()) {
+                    continue;
+                }
+                replacements.push_back(replacement);
             }
         }
         clang_disposeTokens(translationUnit, tokens, numTokens);
 
         for (size_t i = 0; i < arguments.size(); i++) {
             free(arguments[i]);
+        }
+
+        if (dumpNodes) {
+            clang_visitChildren(cursor, &Unfuckifier::dumpChild, nullptr);
         }
 
         clang_disposeIndex(index);
@@ -269,8 +296,49 @@ struct Unfuckifier {
             return true;
         }
 
+
         return fixFile(sourceFile, replacements);
     }
+
+    static CXChildVisitResult dumpChild(CXCursor cursor, CXCursor parent, CXClientData client_data)
+    {
+        Unfuckifier *that = reinterpret_cast<Unfuckifier*>(client_data);
+
+        CXSourceLocation loc = clang_getCursorLocation(cursor);
+        if (clang_Location_isInSystemHeader(loc)) {
+            return CXChildVisit_Continue;
+        }
+        const CXCursorKind cursorKind = clang_getCursorKind(cursor);
+
+        if (!clang_Location_isFromMainFile(loc)) {
+            return CXChildVisit_Recurse;
+        }
+
+        CXType type = clang_getCursorType(cursor);
+        std::cout << "\ntype " << clang_getTypeSpelling(type) << std::endl;
+        std::cout << " - return type " << clang_getTypeSpelling(clang_getResultType(type)) << std::endl;
+        std::cout << " - return type kind " << clang_getTypeKindSpelling(clang_getResultType(type).kind) << std::endl;
+        std::cout << " - kind " << clang_getTypeKindSpelling(type.kind) << std::endl;
+        std::cout << " - cursor kind " << clang_getCursorKindSpelling(cursor.kind) << std::endl;
+        std::cout << " - pretty printed " << clang_getCursorPrettyPrinted(cursor, nullptr) << std::endl;
+        std::cout << " - num arguments " << clang_Cursor_getNumArguments(cursor) << std::endl;
+        for (int i=0; i< clang_Cursor_getNumArguments(cursor); i++) {
+            std::cout << " -> argument "  << clang_getTypeSpelling(clang_getCursorType(clang_Cursor_getArgument(cursor, i))) << std::endl;
+        }
+
+        CXSourceRange extent = clang_getCursorExtent(cursor);
+
+        const CXSourceLocation start = clang_getRangeStart(extent);
+        const CXSourceLocation end = clang_getRangeEnd(extent);
+        unsigned lineStart, lineEnd;
+        CXFile fileStart, fileEnd;
+        clang_getSpellingLocation(start, &fileStart, &lineStart, nullptr, nullptr);
+        clang_getSpellingLocation(end, &fileEnd, &lineEnd, nullptr, nullptr);
+        std::cout << " - line start " << lineStart << " line end " << lineEnd << std::endl;
+
+        return CXChildVisit_Recurse;
+    }
+
 
     bool fixFile(const std::string &filePath, const std::vector<Replacement> &replacements)
     {
@@ -347,13 +415,14 @@ struct Unfuckifier {
     bool replaceFile = false;
     bool verbose = false;
     bool skipBuildDir = true;
+    bool dumpNodes = false;
 };
 
 static void printUsage(const std::string &executable)
 {
     std::cerr << "Please pass a compile_commands.json and a source file, or --all to fix all files in project" << std::endl;
     std::cerr << "To replace the existing files pass --replace" << std::endl;
-    std::cerr << executable << " path/to/compile_commands.json [--replace] [--all] [path/to/heretical.cpp]" << std::endl;
+    std::cerr << "\t" << executable << " path/to/compile_commands.json [--verbose] [--dump-nodes] [--replace] [--all] [path/to/heretical.cpp]" << std::endl;
     std::cerr << "To create a compilation database run cmake with '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON' on the project you're going to fix" << std::endl;
 }
 
@@ -376,11 +445,19 @@ int main(int argc, char *argv[])
             all = true;
             continue;
         }
-
         if (arg == "--replace") {
             fixer.replaceFile = true;
             continue;
         }
+        if (arg == "--verbose") {
+            fixer.verbose = true;
+            continue;
+        }
+        if (arg == "--dump-nodes") {
+            fixer.dumpNodes = true;
+            continue;
+        }
+
         std::filesystem::path path(arg);
         if (!std::filesystem::exists(path)) {
             continue;

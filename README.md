@@ -58,3 +58,21 @@ this for a distro that doesn't allow swearing:
  - auto-was-a-mistake-please-help
  - N1984, The Name Should Have Given It Away
  - no-n1984
+
+
+Known issues
+------------
+
+If libclang is unable to give a proper type for something (like lambdas), we can't replace it.
+
+There are some issues with libclang's handling of tokens vs. cursors, e. g. it
+will give us the fully qualified type (including const, \*, &, etc.), but the
+extent we get only covers `auto` itself.
+
+We should handle the cases here properly now, but no guarantees that I have catched all cases.
+
+
+TODO
+----
+
+ - Find a proper function signature and create an appropriate std::function for lambdas.
