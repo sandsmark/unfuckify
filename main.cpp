@@ -56,6 +56,15 @@ struct Unfuckifier {
         Replacement replacement;
         replacement.string = getString(clang_getTypeSpelling(type));
 
+        CXSourceRange extent = clang_getTokenExtent(translationUnit, *autoToken);
+
+        const CXSourceLocation start = clang_getRangeStart(extent);
+        const CXSourceLocation end = clang_getRangeEnd(extent);
+        unsigned lineStart, lineEnd;
+        CXFile fileStart, fileEnd;
+        clang_getSpellingLocation(start, &fileStart, &lineStart, nullptr, &replacement.start);
+        clang_getSpellingLocation(end, &fileEnd, &lineEnd, nullptr, &replacement.end);
+
         // Same as with pointers, the token extent only covers `auto`, but
         // clang_getTypeSpelling() returns the whole shebang with const and &
         // and what have you.
@@ -72,6 +81,13 @@ struct Unfuckifier {
             replacement.string = replacement.string.substr(strlen("const "));
         }
 
+        if (replacement.string.find("(lambda at ") != std::string::npos) {
+            std::cerr << " !! Horribly broken crap, please rewrite manually by splitting out into functions" << std::endl;
+            std::cerr << " -> Starts at " << clang_getFileName(fileStart) << ":" << lineStart << std::endl;
+            std::cerr << " <- Ends at " << clang_getFileName(fileEnd) << ":" << lineEnd << std::endl;
+            return {};
+        }
+
         // Couldn't find a way to get libclang to mush together >>, so fix the
         // code style manually.
         // Not the pretties way, but fuck you if you judge me for it :))
@@ -81,12 +97,6 @@ struct Unfuckifier {
             braceSpace = replacement.string.find(" >");
         }
 
-        CXSourceRange extent = clang_getTokenExtent(translationUnit, *autoToken);
-
-        const CXSourceLocation start = clang_getRangeStart(extent);
-        const CXSourceLocation end = clang_getRangeEnd(extent);
-        clang_getSpellingLocation(start, nullptr, nullptr, nullptr, &replacement.start);
-        clang_getSpellingLocation(end, nullptr, nullptr, nullptr, &replacement.end);
 
         return replacement;
     }
@@ -221,8 +231,6 @@ struct Unfuckifier {
         CXToken *tokens = nullptr;
         clang_tokenize(translationUnit, clang_getCursorExtent(cursor), &tokens, &numTokens);
 
-        CXToken *autoToken = nullptr;
-
         std::vector<Replacement> replacements;
         for (unsigned i = 0; i < numTokens; i++) {
             if (clang_getTokenKind(tokens[i]) != CXToken_Keyword) {
@@ -347,7 +355,6 @@ int main(int argc, char *argv[])
     bool all = false;
     for (int argNum = 1; argNum < argc; argNum++) {
         const std::string arg = argv[argNum];
-        std::cout << arg << std::endl;
 
         if (arg == "--all") {
             all = true;
