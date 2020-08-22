@@ -28,7 +28,12 @@ std::string getString(const CXString &str)
 }
 
 struct Unfuckifier {
-    void handleAutoToken(CXToken *autoToken, CXTranslationUnit translationUnit)
+    struct Replacement {
+        unsigned start, end;
+        std::string string;
+    };
+
+    static Replacement handleAutoToken(CXToken *autoToken, CXTranslationUnit translationUnit)
     {
         CXCursor cursor;
         clang_annotateTokens(translationUnit, autoToken, 1, &cursor);
@@ -42,7 +47,7 @@ struct Unfuckifier {
         clang_getSpellingLocation(start, nullptr, nullptr, nullptr, &replacement.start);
         clang_getSpellingLocation(end, nullptr, nullptr, nullptr, &replacement.end);
 
-        replacements.push_back(std::move(replacement));
+        return replacement;
     }
 
     bool parseCompilationDatabase(const std::string &compilePath)
@@ -171,13 +176,14 @@ struct Unfuckifier {
 
         CXToken *autoToken = nullptr;
 
+        std::vector<Replacement> replacements;
         for (unsigned i = 0; i < numTokens; i++) {
             if (clang_getTokenKind(tokens[i]) != CXToken_Keyword) {
                 continue;
             }
 
             if (getString(clang_getTokenSpelling(translationUnit, tokens[i])) == "auto") {
-                handleAutoToken(&tokens[i], translationUnit);
+                replacements.push_back(handleAutoToken(&tokens[i], translationUnit));
             }
         }
         clang_disposeTokens(translationUnit, tokens, numTokens);
@@ -189,10 +195,14 @@ struct Unfuckifier {
         clang_disposeIndex(index);
         clang_disposeTranslationUnit(translationUnit);
 
-        return fixFile(sourceFile);
+        if (replacements.empty()) {
+            return true;
+        }
+
+        return fixFile(sourceFile, replacements);
     }
 
-    bool fixFile(const std::string &filePath)
+    bool fixFile(const std::string &filePath, const std::vector<Replacement> &replacements)
     {
         if (replacements.empty()) {
             std::cerr << "Nothing to fix" << std::endl;
@@ -257,16 +267,12 @@ struct Unfuckifier {
 
         return true;
     }
-
-    struct Replacement {
-        unsigned start, end;
-        std::string string;
-    };
-    std::vector<Replacement> replacements;
     bool replaceFile = false;
 
     CXCompilationDatabase compilationDatabase{};
     int childrenVisited = 0;
+
+    bool verbose = false;
 };
 
 static void printUsage(const std::string &executable)
