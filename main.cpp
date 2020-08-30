@@ -226,6 +226,12 @@ struct Unfuckifier {
     }
 
     ~Unfuckifier() {
+        if (index) {
+            clang_disposeIndex(index);
+        }
+        if (translationUnit) {
+            clang_disposeTranslationUnit(translationUnit);
+        }
         clang_CompilationDatabase_dispose(compilationDatabase);
     }
 
@@ -272,24 +278,35 @@ struct Unfuckifier {
 
         clang_CompileCommands_dispose(compileCommands);
 
-        CXIndex index = clang_createIndex(
+        index = clang_createIndex(
                             0,
                             1 // Print warnings and errors
                         );
 
-        CXTranslationUnit translationUnit{};
 
         // Need to use the full argv thing for clang to pick up default paths
         CXErrorCode parseError = clang_parseTranslationUnit2FullArgv(
             index,
-            0,
+            // source file, we can't pass this or it won't tell us that it failed (wtf)
+            // If we don't pass it, however, it doesn't return an error code
+            nullptr,
             arguments.data(),
             arguments.size(),
-            nullptr,
-            0,
+            nullptr, // unsaved_files
+            0, // num_unsaved_files
             CXTranslationUnit_None, // flags
             &translationUnit
         );
+
+        for (unsigned i=0; i<clang_getNumDiagnostics(translationUnit); i++) {
+            CXDiagnostic diagnostic = clang_getDiagnostic(translationUnit, i);
+            const CXDiagnosticSeverity severity = clang_getDiagnosticSeverity(diagnostic);
+            clang_disposeDiagnostic(diagnostic);
+
+            if (severity >= CXDiagnostic_Error) {
+                return false;
+            }
+        }
 
         if (parseError != CXError_Success) {
             std::cerr << "Failed to parse " << sourceFile << ": ";
@@ -304,7 +321,7 @@ struct Unfuckifier {
                 std::cerr << "Invalid arguments passed to parser (blame me)" << std::endl;
                 break;
             case CXError_ASTReadError:
-                std::cerr << "AST deserialization error (should never happen, I don't use it)" << std::endl;
+                std::cerr << "AST deserialization error (compile error?)" << std::endl;
                 break;
             default:
                 std::cerr << "Unknown error " << parseError << std::endl;
@@ -429,9 +446,6 @@ struct Unfuckifier {
             clang_visitChildren(cursor, &Unfuckifier::dumpChild, nullptr);
         }
 
-        clang_disposeIndex(index);
-        clang_disposeTranslationUnit(translationUnit);
-
         if (replacements.empty()) {
             std::cout << "no autos." << std::endl;
             return true;
@@ -552,6 +566,8 @@ struct Unfuckifier {
     }
 
     CXCompilationDatabase compilationDatabase{};
+    CXIndex index = nullptr;
+    CXTranslationUnit translationUnit = nullptr;
 
     bool replaceFile = false;
     bool verbose = false;
@@ -622,7 +638,7 @@ int main(int argc, char *argv[])
     if (all) {
         for (const std::string &file : fixer.allAvailableFiles()) {
             if (!fixer.process(file)) {
-                std::cerr << "Failed to process " << sourceFile << std::endl;
+                std::cerr << "Failed to process " << file << std::endl;
                 return 1;
             }
         }
