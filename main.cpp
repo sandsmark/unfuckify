@@ -242,10 +242,7 @@ struct Unfuckifier {
 
     void grokFile(const std::string &sourceFile, CXSourceRange extent)
     {
-        std::cout << "Checking " << sourceFile << std::endl;
-        //if (!fileContainsAuto(sourceFile.c_str())) {
-        //    return;
-        //}
+        if (verbose) std::cout << "Checking " << sourceFile << std::endl;
 
         // We can't traverse the AST, because auto's are already resolved
         unsigned numTokens;
@@ -377,7 +374,7 @@ struct Unfuckifier {
         std::error_code fsError;
         std::string filePath = std::filesystem::canonical(getString(clang_getFileName(included_file)), fsError).string();
         if (fsError) {
-            std::cerr << fsError.message() << std::endl;
+            std::cerr << "Failed to find proper name for " << getString(clang_getFileName(included_file)) << ": " << fsError.message() << std::endl;
             return;
         }
 
@@ -398,7 +395,7 @@ struct Unfuckifier {
         }
 
         if (!memmem(fileContents, fileSize, "auto", strlen("auto"))) {
-            std::cout << filePath << " doesn't contain auto" << std::endl;
+            if (that->verbose) std::cout << filePath << " doesn't contain auto" << std::endl;
             return;
         }
 
@@ -514,15 +511,16 @@ struct Unfuckifier {
             return false;
         }
 
-        clang_getInclusions(translationUnit, inclusionVisitor, this);
-
-        // auto for testing
-        auto cursor = clang_getTranslationUnitCursor(translationUnit);
-
         for (size_t i = 0; i < arguments.size(); i++) {
             free(arguments[i]);
         }
 
+        if (!skipHeaders) {
+            clang_getInclusions(translationUnit, inclusionVisitor, this);
+        }
+
+        // auto for testing
+        auto cursor = clang_getTranslationUnitCursor(translationUnit);
         grokFile(sourceFile, clang_getCursorExtent(cursor));
 
         if (dumpNodes) {
