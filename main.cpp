@@ -9,6 +9,7 @@
 #include <cstring>
 
 extern "C" {
+#include <unistd.h>
 #include <clang-c/Index.h>
 #include <clang-c/CXCompilationDatabase.h>
 }
@@ -654,6 +655,7 @@ int main(int argc, char *argv[])
         return 1;
     }
     compileDbPath.remove_filename();
+    chdir(compileDbPath.c_str());
 
     fixer.parseCompilationDatabase(compileDbPath.string());
 
