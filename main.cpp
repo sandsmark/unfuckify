@@ -752,7 +752,7 @@ int main(int argc, char *argv[])
         return 1;
     }
     compileDbPath.remove_filename();
-    chdir(compileDbPath.c_str());
+    (void)chdir(compileDbPath.c_str());
 
     fixer.parseCompilationDatabase(compileDbPath.string());
 
