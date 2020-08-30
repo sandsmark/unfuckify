@@ -603,28 +603,62 @@ struct Unfuckifier {
         std::vector<char> buffer;
         int lastPos = 0;
 
+        bool failed = false;
         for (const Replacement &replacement : replacements) {
             //if (replacement.string.empty()) {
             //    if (verbose) std::cout << "Skipping empty replacement" << std::endl;
             //    continue;
             //}
             buffer.resize(replacement.start - lastPos);
-            fread(buffer.data(), buffer.size(), 1, file);
-            fwrite(buffer.data(), buffer.size(), 1, outFile);
-            fwrite(replacement.string.c_str(), replacement.string.size(), 1, outFile);
+            if (fread(buffer.data(), buffer.size(), 1, file) != 1) {
+                std::cerr << "Failed to read from original file" << std::endl;
+                failed = true;
+                break;
+            }
+            if  (fwrite(buffer.data(), buffer.size(), 1, outFile) != 1) {
+                std::cerr << "Failed to write to file" << std::endl;
+                failed = true;
+                break;
+            }
+            if (fwrite(replacement.string.c_str(), replacement.string.size(), 1, outFile) != 1) {
+                std::cerr << "Failed to write replacement to file" << std::endl;
+                failed = true;
+                break;
+            }
 
             lastPos = replacement.end;
             fseek(file, replacement.end - replacement.start, SEEK_CUR);
         }
 
+        if (failed) {
+            fclose(file);
+            fclose(outFile);
+            return false;
+        }
+
         if (lastPos < fileSize) {
             buffer.resize(fileSize - lastPos);
-            fread(buffer.data(), buffer.size(), 1, file);
-            fwrite(buffer.data(), buffer.size(), 1, outFile);
+            if (fread(buffer.data(), buffer.size(), 1, file) != 1) {
+                std::cerr << "Failed to read remainder" << std::endl;
+                fclose(file);
+                fclose(outFile);
+                return false;
+            }
+
+            if (fwrite(buffer.data(), buffer.size(), 1, outFile) != 1) {
+                std::cerr << "Failed to write remainder" << std::endl;
+                fclose(file);
+                fclose(outFile);
+                return false;
+            }
         }
 
         fclose(file);
         fclose(outFile);
+
+        if (failed) {
+            return false;
+        }
 
         if (!replaceFile) {
             return true;
