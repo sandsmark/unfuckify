@@ -266,12 +266,19 @@ struct Unfuckifier {
 
         if (verbose) std::cout << "Compile commands:";
         for (size_t i = 0; i < arguments.size(); i++) {
-            CXString argument = clang_CompileCommand_getArg(compileCommand, i);
-            arguments[i] = strdup(clang_getCString(argument));
+            std::string argument = getString(clang_CompileCommand_getArg(compileCommand, i));
+
+            if (i == 0 && argument.find("ccache") != std::string::npos) {
+                if (argument.find("clang++") != std::string::npos) {
+                    arguments[i] = strdup("/usr/bin/clang++");
+                } else {
+                    arguments[i] = strdup("/usr/bin/clang");
+                }
+            } else {
+                arguments[i] = strdup(argument.c_str());
+            }
 
             if (verbose) std::cout << " " << arguments[i] << std::flush;
-
-            clang_disposeString(argument);
         }
 
         if (verbose) std::cout << std::endl;
