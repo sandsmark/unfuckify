@@ -585,7 +585,7 @@ static void printUsage(const std::string &executable)
 {
     std::cerr << "Please pass a compile_commands.json and a source file, or --all to fix all files in project" << std::endl;
     std::cerr << "To replace the existing files pass --replace" << std::endl;
-    std::cerr << "\t" << executable << " path/to/compile_commands.json [--verbose] [--dump-nodes] [--replace] [--skip-headers] [--all] [path/to/heretical.cpp]" << std::endl;
+    std::cerr << "\t" << executable << " path/to/compile_commands.json [--verbose] [--dump-nodes] [--replace] [--skip-headers] [--stop-on-fail] [--all] [path/to/heretical.cpp]" << std::endl;
     std::cerr << "To create a compilation database run cmake with '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON' on the project you're going to fix" << std::endl;
 }
 
@@ -601,6 +601,7 @@ int main(int argc, char *argv[])
 
     Unfuckifier fixer;
     bool all = false;
+    bool stopOnFail = false;
     for (int argNum = 1; argNum < argc; argNum++) {
         const std::string arg = argv[argNum];
 
@@ -622,6 +623,10 @@ int main(int argc, char *argv[])
         }
         if (arg == "--skip-headers") {
             fixer.skipHeaders = true;
+            continue;
+        }
+        if (arg == "--stop-on-fail") {
+            stopOnFail = true;
             continue;
         }
 
@@ -649,7 +654,9 @@ int main(int argc, char *argv[])
         for (const std::string &file : fixer.allAvailableFiles()) {
             if (!fixer.process(file)) {
                 std::cerr << "Failed to process " << file << std::endl;
-                return 1;
+                if (!stopOnFail) {
+                    return 1;
+                }
             }
         }
     } else {
