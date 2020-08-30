@@ -239,7 +239,7 @@ struct Unfuckifier {
     {
         const std::string filename = std::filesystem::path(sourceFile).filename();
         // Quickly scan the file to see if it contains the string "auto"
-        if (!fileContainsAuto(sourceFile)) {
+        if (skipHeaders && !fileContainsAuto(sourceFile)) {
             std::cout << filename << " does not contain 'auto'" << std::endl;
             return true;
         }
@@ -347,6 +347,17 @@ struct Unfuckifier {
         std::vector<Replacement> replacements;
         bool prevWasAuto = false;
         for (unsigned i = 0; i < numTokens; i++) {
+            CXSourceRange extent = clang_getTokenExtent(translationUnit, tokens[i]);
+            const CXSourceLocation start = clang_getRangeStart(extent);
+            const CXSourceLocation end = clang_getRangeEnd(extent);
+            if (clang_Location_isInSystemHeader(start)) {
+                continue;
+            }
+
+            if (skipHeaders && !clang_Location_isFromMainFile(start)) {
+                continue;
+            }
+
             const std::string tokenString = getString(clang_getTokenSpelling(translationUnit, tokens[i]));
 
             if (dumpNodes) {
@@ -379,9 +390,6 @@ struct Unfuckifier {
                 Replacement replacement;
                 replacement.string = "";
 
-                CXSourceRange extent = clang_getTokenExtent(translationUnit, tokens[i]);
-                const CXSourceLocation start = clang_getRangeStart(extent);
-                const CXSourceLocation end = clang_getRangeEnd(extent);
                 clang_getSpellingLocation(start, nullptr, nullptr, nullptr, &replacement.start);
                 clang_getSpellingLocation(end, nullptr, nullptr, nullptr, &replacement.end);
                 replacements.push_back(replacement);
@@ -412,9 +420,6 @@ struct Unfuckifier {
                 Replacement replacement;
                 replacement.string = "&";
 
-                CXSourceRange extent = clang_getTokenExtent(translationUnit, tokens[i]);
-                const CXSourceLocation start = clang_getRangeStart(extent);
-                const CXSourceLocation end = clang_getRangeEnd(extent);
                 clang_getSpellingLocation(start, nullptr, nullptr, nullptr, &replacement.start);
                 clang_getSpellingLocation(end, nullptr, nullptr, nullptr, &replacement.end);
                 replacements.push_back(replacement);
@@ -573,13 +578,14 @@ struct Unfuckifier {
     bool verbose = false;
     bool skipBuildDir = true;
     bool dumpNodes = false;
+    bool skipHeaders = false;
 };
 
 static void printUsage(const std::string &executable)
 {
     std::cerr << "Please pass a compile_commands.json and a source file, or --all to fix all files in project" << std::endl;
     std::cerr << "To replace the existing files pass --replace" << std::endl;
-    std::cerr << "\t" << executable << " path/to/compile_commands.json [--verbose] [--dump-nodes] [--replace] [--all] [path/to/heretical.cpp]" << std::endl;
+    std::cerr << "\t" << executable << " path/to/compile_commands.json [--verbose] [--dump-nodes] [--replace] [--skip-headers] [--all] [path/to/heretical.cpp]" << std::endl;
     std::cerr << "To create a compilation database run cmake with '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON' on the project you're going to fix" << std::endl;
 }
 
@@ -612,6 +618,10 @@ int main(int argc, char *argv[])
         }
         if (arg == "--dump-nodes") {
             fixer.dumpNodes = true;
+            continue;
+        }
+        if (arg == "--skip-headers") {
+            fixer.skipHeaders = true;
             continue;
         }
 
