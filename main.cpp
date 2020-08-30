@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <cstring>
+#include <cassert>
 
 extern "C" {
 #include <unistd.h>
@@ -23,7 +24,10 @@ std::ostream &operator<<(std::ostream &stream, const CXString &str)
 
 std::string getString(const CXString &str)
 {
-    std::string ret(clang_getCString(str));
+    const char *cstr = clang_getCString(str);
+    std::string ret;
+    if (cstr) ret = std::string(cstr);
+    else ret = "(nullptr)";
     clang_disposeString(str);
     return ret;
 }
@@ -236,121 +240,17 @@ struct Unfuckifier {
         clang_CompilationDatabase_dispose(compilationDatabase);
     }
 
-    bool process(const std::string &sourceFile)
+    void grokFile(const std::string &sourceFile, CXSourceRange extent)
     {
-        const std::string filename = std::filesystem::path(sourceFile).filename();
-        // Quickly scan the file to see if it contains the string "auto"
-        if (skipHeaders && !fileContainsAuto(sourceFile)) {
-            std::cout << filename << " does not contain 'auto'" << std::endl;
-            return true;
-        }
-
-        std::cout << "Processing ";
-        if (verbose) std::cout << sourceFile;
-        else std::cout << filename;
-        std::cout << "... " << std::flush;
-
-        CXCompileCommands compileCommands = clang_CompilationDatabase_getCompileCommands(
-                                                compilationDatabase,
-                                                sourceFile.c_str()
-                                            );
-
-        if (!compileCommands) {
-            std::cerr << "Failed to find compile command for " << sourceFile << std::endl;
-            return false;
-        }
-
-
-        CXCompileCommand compileCommand = clang_CompileCommands_getCommand(compileCommands, 0);
-
-        std::vector<char*> arguments(clang_CompileCommand_getNumArgs(compileCommand));
-
-        if (verbose) std::cout << "Compile commands:";
-        for (size_t i = 0; i < arguments.size(); i++) {
-            std::string argument = getString(clang_CompileCommand_getArg(compileCommand, i));
-
-            if (i == 0 && argument.find("ccache") != std::string::npos) {
-                if (argument.find("clang++") != std::string::npos) {
-                    arguments[i] = strdup("/usr/bin/clang++");
-                } else {
-                    arguments[i] = strdup("/usr/bin/clang");
-                }
-            } else {
-                arguments[i] = strdup(argument.c_str());
-            }
-
-            if (verbose) std::cout << " " << arguments[i] << std::flush;
-        }
-
-        if (verbose) std::cout << std::endl;
-
-        clang_CompileCommands_dispose(compileCommands);
-
-        index = clang_createIndex(
-                            0,
-                            1 // Print warnings and errors
-                        );
-
-
-        // Need to use the full argv thing for clang to pick up default paths
-        CXErrorCode parseError = clang_parseTranslationUnit2FullArgv(
-            index,
-            // source file, we can't pass this or it won't tell us that it failed (wtf)
-            // If we don't pass it, however, it doesn't return an error code
-            nullptr,
-            arguments.data(),
-            arguments.size(),
-            nullptr, // unsaved_files
-            0, // num_unsaved_files
-            CXTranslationUnit_None, // flags
-            &translationUnit
-        );
-
-        for (unsigned i=0; i<clang_getNumDiagnostics(translationUnit); i++) {
-            CXDiagnostic diagnostic = clang_getDiagnostic(translationUnit, i);
-            const CXDiagnosticSeverity severity = clang_getDiagnosticSeverity(diagnostic);
-            clang_disposeDiagnostic(diagnostic);
-
-            if (severity >= CXDiagnostic_Error) {
-                return false;
-            }
-        }
-
-        if (parseError != CXError_Success) {
-            std::cerr << "Failed to parse " << sourceFile << ": ";
-            switch(parseError) {
-            case CXError_Failure:
-                std::cerr << "Generic unknown error (clang doesn't tell me more)" << std::endl;
-                break;
-            case CXError_Crashed:
-                std::cerr << "libclang crashed (then how did it return this to me?)" << std::endl;
-                break;
-            case CXError_InvalidArguments:
-                std::cerr << "Invalid arguments passed to parser (blame me)" << std::endl;
-                break;
-            case CXError_ASTReadError:
-                std::cerr << "AST deserialization error (compile error?)" << std::endl;
-                break;
-            default:
-                std::cerr << "Unknown error " << parseError << std::endl;
-                break;
-            }
-            return false;
-        }
-
-
-        if (!translationUnit) {
-            std::cerr << "No parse error, but didn't get a translation unit for " << sourceFile << std::endl;
-            return false;
-        }
-
-        // auto for testing
-        auto cursor = clang_getTranslationUnitCursor(translationUnit);
+        std::cout << "Checking " << sourceFile << std::endl;
+        //if (!fileContainsAuto(sourceFile.c_str())) {
+        //    return;
+        //}
 
         // We can't traverse the AST, because auto's are already resolved
         unsigned numTokens;
         CXToken *tokens = nullptr;
-        clang_tokenize(translationUnit, clang_getCursorExtent(cursor), &tokens, &numTokens);
+        clang_tokenize(translationUnit, extent, &tokens, &numTokens);
 
         std::vector<Replacement> replacements;
         bool prevWasAuto = false;
@@ -451,21 +351,185 @@ struct Unfuckifier {
         }
         clang_disposeTokens(translationUnit, tokens, numTokens);
 
+        if (replacements.empty()) {
+            std::cout << sourceFile << " no autos." << std::endl;
+            return;
+        }
+
+
+        fixFile(sourceFile, replacements);
+    }
+
+    static void inclusionVisitor(CXFile included_file, CXSourceLocation* inclusion_stack, unsigned include_len, CXClientData client_data)
+    {
+        Unfuckifier *that = reinterpret_cast<Unfuckifier*>(client_data);
+        if (include_len == 0) {
+            return;
+        }
+
+        CXSourceLocation startLocation = clang_getLocationForOffset(that->translationUnit, included_file, 0);
+
+        if (clang_Location_isInSystemHeader(startLocation)) {
+            return;
+        }
+
+        // stl is utter crap, as usual, because nice APIs would be too much
+        std::error_code fsError;
+        std::string filePath = std::filesystem::canonical(getString(clang_getFileName(included_file)), fsError).string();
+        if (fsError) {
+            std::cerr << fsError.message() << std::endl;
+            return;
+        }
+
+        // libclang is shit, clang_Location_isInSystemHeader works some times, aka. never
+        if (filePath.find("/usr/") == 0) {
+            return;
+        }
+
+        if (that->parsedFiles.count(filePath)) {
+            return;
+        }
+        that->parsedFiles.insert(filePath);
+
+        size_t fileSize;
+        const char *fileContents = clang_getFileContents(that->translationUnit, included_file, &fileSize);
+        if (!fileContents || fileSize == 0) {
+            return;
+        }
+
+        if (!memmem(fileContents, fileSize, "auto", strlen("auto"))) {
+            std::cout << filePath << " doesn't contain auto" << std::endl;
+            return;
+        }
+
+        const CXSourceLocation endLocation = clang_getLocationForOffset(that->translationUnit, included_file, fileSize);
+        that->grokFile(filePath, clang_getRange(startLocation, endLocation));
+    }
+
+    bool process(const std::string &sourceFile)
+    {
+        const std::string filename = std::filesystem::path(sourceFile).filename();
+        // Quickly scan the file to see if it contains the string "auto"
+        if (skipHeaders && !fileContainsAuto(sourceFile)) {
+            std::cout << filename << " does not contain 'auto'" << std::endl;
+            return true;
+        }
+
+        std::cout << "Processing ";
+        if (verbose) std::cout << sourceFile;
+        else std::cout << filename;
+        std::cout << "... " << std::flush;
+
+        CXCompileCommands compileCommands = clang_CompilationDatabase_getCompileCommands(
+                                                compilationDatabase,
+                                                sourceFile.c_str()
+                                            );
+
+        if (!compileCommands) {
+            std::cerr << "Failed to find compile command for " << sourceFile << std::endl;
+            return false;
+        }
+
+        CXCompileCommand compileCommand = clang_CompileCommands_getCommand(compileCommands, 0);
+
+        std::vector<char*> arguments(clang_CompileCommand_getNumArgs(compileCommand));
+
+        if (verbose) std::cout << "Compile commands:";
+        for (size_t i = 0; i < arguments.size(); i++) {
+            std::string argument = getString(clang_CompileCommand_getArg(compileCommand, i));
+
+            if (i == 0 && argument.find("ccache") != std::string::npos) {
+                if (argument.find("clang++") != std::string::npos) {
+                    arguments[i] = strdup("/usr/bin/clang++");
+                } else {
+                    arguments[i] = strdup("/usr/bin/clang");
+                }
+            } else {
+                arguments[i] = strdup(argument.c_str());
+            }
+
+            if (verbose) std::cout << " " << arguments[i] << std::flush;
+        }
+
+        if (verbose) std::cout << std::endl;
+
+        clang_CompileCommands_dispose(compileCommands);
+
+        index = clang_createIndex(
+                            0,
+                            1 // Print warnings and errors
+                        );
+
+
+        // Need to use the full argv thing for clang to pick up default paths
+        CXErrorCode parseError = clang_parseTranslationUnit2FullArgv(
+            index,
+            // source file, we can't pass this or it won't tell us that it failed (wtf)
+            // If we don't pass it, however, it doesn't return an error code
+            nullptr,
+            arguments.data(),
+            arguments.size(),
+            nullptr, // unsaved_files
+            0, // num_unsaved_files
+            CXTranslationUnit_None, // flags
+            &translationUnit
+        );
+        if (verbose) std::cout << "Finished parsing" << std::endl;
+
+        for (unsigned i=0; i<clang_getNumDiagnostics(translationUnit); i++) {
+            CXDiagnostic diagnostic = clang_getDiagnostic(translationUnit, i);
+            const CXDiagnosticSeverity severity = clang_getDiagnosticSeverity(diagnostic);
+            clang_disposeDiagnostic(diagnostic);
+
+            if (severity >= CXDiagnostic_Error) {
+                return false;
+            }
+        }
+
+        if (parseError != CXError_Success) {
+            std::cerr << "Failed to parse " << sourceFile << ": ";
+            switch(parseError) {
+            case CXError_Failure:
+                std::cerr << "Generic unknown error (clang doesn't tell me more)" << std::endl;
+                break;
+            case CXError_Crashed:
+                std::cerr << "libclang crashed (then how did it return this to me?)" << std::endl;
+                break;
+            case CXError_InvalidArguments:
+                std::cerr << "Invalid arguments passed to parser (blame me)" << std::endl;
+                break;
+            case CXError_ASTReadError:
+                std::cerr << "AST deserialization error (compile error?)" << std::endl;
+                break;
+            default:
+                std::cerr << "Unknown error " << parseError << std::endl;
+                break;
+            }
+            return false;
+        }
+
+
+        if (!translationUnit) {
+            std::cerr << "No parse error, but didn't get a translation unit for " << sourceFile << std::endl;
+            return false;
+        }
+
+        clang_getInclusions(translationUnit, inclusionVisitor, this);
+
+        // auto for testing
+        auto cursor = clang_getTranslationUnitCursor(translationUnit);
+
         for (size_t i = 0; i < arguments.size(); i++) {
             free(arguments[i]);
         }
+
+        grokFile(sourceFile, clang_getCursorExtent(cursor));
 
         if (dumpNodes) {
             clang_visitChildren(cursor, &Unfuckifier::dumpChild, nullptr);
         }
 
-        if (replacements.empty()) {
-            std::cout << "no autos." << std::endl;
-            return true;
-        }
-
-
-        return fixFile(sourceFile, replacements);
+        return true;
     }
 
     static CXChildVisitResult dumpChild(CXCursor cursor, CXCursor parent, CXClientData client_data)
@@ -587,6 +651,7 @@ struct Unfuckifier {
     bool skipBuildDir = true;
     bool dumpNodes = false;
     bool skipHeaders = false;
+    std::unordered_set<std::string> parsedFiles;
 };
 
 static void printUsage(const std::string &executable)
@@ -660,10 +725,12 @@ int main(int argc, char *argv[])
     fixer.parseCompilationDatabase(compileDbPath.string());
 
     if (all) {
-        for (const std::string &file : fixer.allAvailableFiles()) {
-            if (!fixer.process(file)) {
-                std::cerr << "Failed to process " << file << std::endl;
-                if (!stopOnFail) {
+        const std::vector<std::string> files = fixer.allAvailableFiles();
+        for (size_t i=0; i<files.size(); i++) {
+            if (!fixer.process(files[i])) {
+                std::cout << i << "/" << files.size() << std::endl;
+                std::cerr << "Failed to process " << files[i] << std::endl;
+                if (stopOnFail) {
                     return 1;
                 }
             }
