@@ -752,7 +752,10 @@ int main(int argc, char *argv[])
         return 1;
     }
     compileDbPath.remove_filename();
-    (void)chdir(compileDbPath.c_str());
+    int posixSucks = chdir(compileDbPath.c_str());
+    if (posixSucks) {
+        std::cerr << "failed to chdir to " << compileDbPath << ", noone cares" << std::endl;
+    }
 
     fixer.parseCompilationDatabase(compileDbPath.string());
 
