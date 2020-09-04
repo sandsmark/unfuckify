@@ -17,7 +17,12 @@ extern "C" {
 
 std::ostream &operator<<(std::ostream &stream, const CXString &str)
 {
-    stream << clang_getCString(str);
+    const char *cstr = clang_getCString(str);
+    if (cstr) {
+        stream << cstr;
+    } else {
+        stream << "(nullptr)";
+    }
     clang_disposeString(str);
     return stream;
 }
