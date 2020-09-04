@@ -519,11 +519,18 @@ struct Unfuckifier {
 
         clang_CompileCommands_dispose(compileCommands);
 
+        if (index) {
+            clang_disposeIndex(index);
+        }
+
         index = clang_createIndex(
                             0,
                             1 // Print warnings and errors
                         );
 
+        if (translationUnit) {
+            clang_disposeTranslationUnit(translationUnit);
+        }
 
         // Need to use the full argv thing for clang to pick up default paths
         CXErrorCode parseError = clang_parseTranslationUnit2FullArgv(
@@ -540,12 +547,17 @@ struct Unfuckifier {
         );
         if (verbose) std::cout << "Finished parsing" << std::endl;
 
+        for (size_t i = 0; i < arguments.size(); i++) {
+            free(arguments[i]);
+        }
+
         for (unsigned i=0; i<clang_getNumDiagnostics(translationUnit); i++) {
             CXDiagnostic diagnostic = clang_getDiagnostic(translationUnit, i);
             const CXDiagnosticSeverity severity = clang_getDiagnosticSeverity(diagnostic);
             clang_disposeDiagnostic(diagnostic);
 
             if (severity >= CXDiagnostic_Error) {
+                std::cout << "Compile error" << std::endl;
                 return false;
             }
         }
@@ -576,10 +588,6 @@ struct Unfuckifier {
         if (!translationUnit) {
             std::cerr << "No parse error, but didn't get a translation unit for " << sourceFile << std::endl;
             return false;
-        }
-
-        for (size_t i = 0; i < arguments.size(); i++) {
-            free(arguments[i]);
         }
 
         if (!skipHeaders) {
