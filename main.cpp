@@ -384,6 +384,10 @@ struct Unfuckifier {
                     continue;
                 }
 
+                if (clang_getResultType(parentType).kind != CXType_Auto) {
+                    continue;
+                }
+
                 std::unordered_map<CXSourceLocation, CXSourceLocation>::const_iterator firstIt = autoLambdas.find(clang_getCursorLocation(parent));
                 if (firstIt == autoLambdas.end()) {
                     std::cerr << "Failed to find lambda auto location" << std::endl;
