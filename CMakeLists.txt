@@ -13,6 +13,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 project(unfuckify)
 find_package(Clang REQUIRED)
-add_executable(unfuckify main.cpp)
+add_executable(unfuckify main.cpp test.cpp)
 target_link_libraries(unfuckify libclang)
 install(TARGETS unfuckify DESTINATION bin)

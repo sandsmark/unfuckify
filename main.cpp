@@ -37,6 +37,23 @@ std::string getString(const CXString &str)
     return ret;
 }
 
+namespace std {
+template<>
+struct hash<CXSourceLocation> {
+    size_t operator()(CXSourceLocation const& any) const {
+        unsigned line, col;
+        clang_getSpellingLocation(any, nullptr, &line, &col, nullptr);
+        // very inefficient idk
+        return (line ^ col);
+    }
+};
+};
+
+static bool operator==(const CXSourceLocation &a, const CXSourceLocation &b)
+{
+    return clang_equalLocations(a, b);
+}
+
 struct Unfuckifier {
     struct Replacement {
         unsigned start, end;
@@ -163,15 +180,8 @@ struct Unfuckifier {
             const CXSourceLocation start = clang_getRangeStart(extent);
             const CXSourceLocation end = clang_getRangeEnd(extent);
             unsigned lineStart, lineEnd;
-            CXFile fileStart, fileEnd;
-            clang_getSpellingLocation(start, &fileStart, &lineStart, nullptr, nullptr);
-            clang_getSpellingLocation(end, &fileEnd, &lineEnd, nullptr, nullptr);
 
-            std::cerr << std::endl;
-            std::cerr << " !! Horribly broken crap, please rewrite manually by splitting out into functions" << std::endl;
-            std::cerr << " -> Starts at " << clang_getFileName(fileStart) << ":" << lineStart << std::endl;
-            std::cerr << " <- Ends at " << clang_getFileName(fileEnd) << ":" << lineEnd << std::endl;
-            return {};
+            return replacement;
         }
 
         // Couldn't find a way to get libclang to mush together >>, so fix the
@@ -254,6 +264,9 @@ struct Unfuckifier {
         CXToken *tokens = nullptr;
         clang_tokenize(translationUnit, extent, &tokens, &numTokens);
 
+        std::unordered_map<CXSourceLocation, Replacement> lambdas;
+        std::unordered_map<CXSourceLocation, CXSourceLocation> autoLambdas;
+
         std::vector<Replacement> replacements;
         bool prevWasAuto = false;
         for (unsigned i = 0; i < numTokens; i++) {
@@ -305,6 +318,16 @@ struct Unfuckifier {
                 continue;
             }
 
+            if (cursor.kind == CXCursor_LambdaExpr) {
+                CXType type = clang_getCursorType(clang_getCursorSemanticParent(cursor));
+                if (type.kind != CXType_Auto) {
+                    continue;
+                }
+
+                Replacement replacement;
+                autoLambdas[clang_getCursorLocation(cursor)] = clang_getCursorLocation(clang_getCursorSemanticParent(cursor));
+            }
+
             // Handle auto&& crap
             if (prevWasAuto && clang_getTokenKind(tokens[i]) != CXToken_Keyword && tokenString == "&&") {
                 prevWasAuto = false;
@@ -345,6 +368,44 @@ struct Unfuckifier {
                 if (replacement.string.empty()) {
                     continue;
                 }
+                if (replacement.string.find("(lambda at ") != std::string::npos) {
+                    lambdas[clang_getCursorLocation(cursor)] = replacement;
+                } else {
+                    replacements.push_back(replacement);
+                }
+                continue;
+            }
+
+            // Handle function pointers
+            if (cursor.kind == CXCursor_ParmDecl) {
+                CXCursor parent = clang_getCursorSemanticParent(cursor);
+                CXType parentType = clang_getCursorType(parent);
+                if (parentType.kind != CXType_FunctionProto) {
+                    continue;
+                }
+
+                std::unordered_map<CXSourceLocation, CXSourceLocation>::const_iterator firstIt = autoLambdas.find(clang_getCursorLocation(parent));
+                if (firstIt == autoLambdas.end()) {
+                    std::cerr << "Failed to find lambda auto location" << std::endl;
+                    dumpCursor(parent);
+                    continue;
+                }
+
+                std::unordered_map<CXSourceLocation, Replacement>::const_iterator it = lambdas.find(firstIt->second);
+                if (it == lambdas.end()) {
+                    std::cerr << "Failed to find lambda" << std::endl;
+                    dumpCursor(parent);
+                    continue;
+                }
+                Replacement replacement = it->second;
+                replacement.string = getString(clang_getTypeSpelling(parentType));
+                std::string::size_type constStart = replacement.string.find(" const");
+                if (constStart == replacement.string.size() - strlen(" const")) {
+                    replacement.string = replacement.string.substr(0, replacement.string.size() - strlen(" const"));
+                }
+                replacement.string = "std::function<" + replacement.string + ">";
+                if (verbose) std::cout << "Found lambda: " << replacement.start << "-" << replacement.end << std::endl;
+                if (verbose) std::cout << replacement.string << std::endl;
                 replacements.push_back(replacement);
             }
         }
