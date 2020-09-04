@@ -359,7 +359,7 @@ struct Unfuckifier {
             prevWasAuto = false;
 
             if (clang_getTokenKind(tokens[i]) != CXToken_Keyword) {
-                continue;
+                //continue;
             }
 
             if (tokenString == "auto") {
@@ -376,22 +376,18 @@ struct Unfuckifier {
                 continue;
             }
 
-            // Handle function pointers
-            if (cursor.kind == CXCursor_ParmDecl) {
-                CXCursor parent = clang_getCursorSemanticParent(cursor);
-                CXType parentType = clang_getCursorType(parent);
-                if (parentType.kind != CXType_FunctionProto) {
-                    continue;
-                }
-
+            // For some reason we have to keep checking the parents, doesn't seem like stuff is resolved otherwise
+            CXCursor parent = clang_getCursorSemanticParent(cursor);
+            CXType parentType = clang_getCursorType(parent);
+            if (parentType.kind == CXType_FunctionProto) {
                 if (clang_getResultType(parentType).kind != CXType_Auto) {
                     continue;
                 }
 
                 std::unordered_map<CXSourceLocation, CXSourceLocation>::const_iterator firstIt = autoLambdas.find(clang_getCursorLocation(parent));
                 if (firstIt == autoLambdas.end()) {
-                    std::cerr << "Failed to find lambda auto location" << std::endl;
-                    dumpCursor(parent);
+                    //std::cerr << "Failed to find lambda auto location" << std::endl;
+                    //dumpCursor(parent);
                     continue;
                 }
 
@@ -653,10 +649,10 @@ struct Unfuckifier {
         dumpCursor(cursor);
         std::cout << "\nparent" << std::endl;
         dumpCursor(parent);
-        std::cout << "\nparent parent" << std::endl;
-        dumpCursor(clang_getCursorSemanticParent(parent));
-        std::cout << "\nparent parent parent" << std::endl;
-        dumpCursor(clang_getCursorSemanticParent(clang_getCursorSemanticParent(parent)));
+        //std::cout << "\nparent parent" << std::endl;
+        //dumpCursor(clang_getCursorSemanticParent(parent));
+        //std::cout << "\nparent parent parent" << std::endl;
+        //dumpCursor(clang_getCursorSemanticParent(clang_getCursorSemanticParent(parent)));
         std::cout << std::endl;
 
         return CXChildVisit_Recurse;
