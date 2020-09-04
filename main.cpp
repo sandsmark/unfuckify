@@ -659,9 +659,9 @@ struct Unfuckifier {
         // Meh, could check when we add them, but I'm lazy
         replacements.erase(std::unique(replacements.begin(), replacements.end(), [](const Replacement &a, const Replacement &b) {
             return a.start == b.start && a.end == b.end && a.string == b.string;
-        }));
+        }), replacements.end());
         for (const Replacement &r : replacements) {
-            std::cout << r.start << " - " << r.end << " : " << r.string << std::endl;
+            if (verbose) std::cout << "Replacement: " << r.start << " - " << r.end << " -> " << r.string << std::endl;
         }
         if (replacements.empty()) {
             std::cerr << "Nothing to fix" << std::endl;
