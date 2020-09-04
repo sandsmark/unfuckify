@@ -535,6 +535,36 @@ struct Unfuckifier {
         return true;
     }
 
+    static void dumpCursor(CXCursor cursor)
+    {
+        std::cout << "-------------" << std::endl;
+
+        CXType type = clang_getCursorType(cursor);
+        std::cout << " - type " << clang_getTypeSpelling(type) << std::endl;
+        std::cout << " - return type " << clang_getTypeSpelling(clang_getResultType(type)) << std::endl;
+        std::cout << " - return type kind " << clang_getTypeKindSpelling(clang_getResultType(type).kind) << std::endl;
+        std::cout << " - kind " << clang_getTypeKindSpelling(type.kind) << std::endl;
+        std::cout << " - cursor kind " << clang_getCursorKindSpelling(cursor.kind) << std::endl;
+        std::cout << " - pretty printed " << clang_getCursorPrettyPrinted(cursor, nullptr) << std::endl;
+        std::cout << " - num t arguments " << clang_Cursor_getNumTemplateArguments(cursor) << std::endl;
+        std::cout << " - num arguments " << clang_Cursor_getNumArguments(cursor) << std::endl;
+        for (int i=0; i< clang_Cursor_getNumArguments(cursor); i++) {
+            std::cout << " -> argument "  << clang_getTypeSpelling(clang_getCursorType(clang_Cursor_getArgument(cursor, i))) << std::endl;
+        }
+        CXSourceRange extent = clang_getCursorExtent(cursor);
+
+        const CXSourceLocation start = clang_getRangeStart(extent);
+        const CXSourceLocation end = clang_getRangeEnd(extent);
+        unsigned lineStart, lineEnd;
+        unsigned colStart, colEnd;
+        CXFile fileStart, fileEnd;
+        clang_getSpellingLocation(start, &fileStart, &lineStart, &colStart, nullptr);
+        clang_getSpellingLocation(end, &fileEnd, &lineEnd, &colEnd, nullptr);
+        std::cout << " - line start " << lineStart << " line end " << lineEnd << std::endl;
+        std::cout << " - col start " << colStart << " col end " << colEnd << std::endl;
+        std::cout << "====" << std::endl;
+    }
+
     static CXChildVisitResult dumpChild(CXCursor cursor, CXCursor parent, CXClientData client_data)
     {
         Unfuckifier *that = reinterpret_cast<Unfuckifier*>(client_data);
@@ -549,27 +579,15 @@ struct Unfuckifier {
             return CXChildVisit_Recurse;
         }
 
-        CXType type = clang_getCursorType(cursor);
-        std::cout << "\ntype " << clang_getTypeSpelling(type) << std::endl;
-        std::cout << " - return type " << clang_getTypeSpelling(clang_getResultType(type)) << std::endl;
-        std::cout << " - return type kind " << clang_getTypeKindSpelling(clang_getResultType(type).kind) << std::endl;
-        std::cout << " - kind " << clang_getTypeKindSpelling(type.kind) << std::endl;
-        std::cout << " - cursor kind " << clang_getCursorKindSpelling(cursor.kind) << std::endl;
-        std::cout << " - pretty printed " << clang_getCursorPrettyPrinted(cursor, nullptr) << std::endl;
-        std::cout << " - num arguments " << clang_Cursor_getNumArguments(cursor) << std::endl;
-        for (int i=0; i< clang_Cursor_getNumArguments(cursor); i++) {
-            std::cout << " -> argument "  << clang_getTypeSpelling(clang_getCursorType(clang_Cursor_getArgument(cursor, i))) << std::endl;
-        }
-
-        CXSourceRange extent = clang_getCursorExtent(cursor);
-
-        const CXSourceLocation start = clang_getRangeStart(extent);
-        const CXSourceLocation end = clang_getRangeEnd(extent);
-        unsigned lineStart, lineEnd;
-        CXFile fileStart, fileEnd;
-        clang_getSpellingLocation(start, &fileStart, &lineStart, nullptr, nullptr);
-        clang_getSpellingLocation(end, &fileEnd, &lineEnd, nullptr, nullptr);
-        std::cout << " - line start " << lineStart << " line end " << lineEnd << std::endl;
+        std::cout << "\ncursor" << std::endl;
+        dumpCursor(cursor);
+        std::cout << "\nparent" << std::endl;
+        dumpCursor(parent);
+        std::cout << "\nparent parent" << std::endl;
+        dumpCursor(clang_getCursorSemanticParent(parent));
+        std::cout << "\nparent parent parent" << std::endl;
+        dumpCursor(clang_getCursorSemanticParent(clang_getCursorSemanticParent(parent)));
+        std::cout << std::endl;
 
         return CXChildVisit_Recurse;
     }
