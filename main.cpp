@@ -590,8 +590,18 @@ struct Unfuckifier {
     }
 
 
-    bool fixFile(const std::string &filePath, const std::vector<Replacement> &replacements)
+    bool fixFile(const std::string &filePath, std::vector<Replacement> &replacements)
     {
+        std::sort(replacements.begin(), replacements.end(), [](const Replacement &a, const Replacement &b) {
+            return a.start > b.start;
+        });
+        // Meh, could check when we add them, but I'm lazy
+        replacements.erase(std::unique(replacements.begin(), replacements.end(), [](const Replacement &a, const Replacement &b) {
+            return a.start == b.start && a.end == b.end && a.string == b.string;
+        }));
+        for (const Replacement &r : replacements) {
+            std::cout << r.start << " - " << r.end << " : " << r.string << std::endl;
+        }
         if (replacements.empty()) {
             std::cerr << "Nothing to fix" << std::endl;
             return false;
