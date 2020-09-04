@@ -340,12 +340,12 @@ struct Unfuckifier {
             }
 
             if (tokenString == "auto") {
+                prevWasAuto = true;
                 Replacement replacement = handleAutoToken(&tokens[i], translationUnit);
                 if (replacement.string.empty()) {
                     continue;
                 }
                 replacements.push_back(replacement);
-                prevWasAuto = true;
             }
         }
         clang_disposeTokens(translationUnit, tokens, numTokens);
@@ -792,8 +792,8 @@ int main(int argc, char *argv[])
     if (all) {
         const std::vector<std::string> files = fixer.allAvailableFiles();
         for (size_t i=0; i<files.size(); i++) {
+            std::cout << i << "/" << files.size() << std::endl;
             if (!fixer.process(files[i])) {
-                std::cout << i << "/" << files.size() << std::endl;
                 std::cerr << "Failed to process " << files[i] << std::endl;
                 if (stopOnFail) {
                     return 1;
