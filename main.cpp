@@ -269,13 +269,13 @@ struct Unfuckifier {
             }
 
             const std::string tokenString = getString(clang_getTokenSpelling(translationUnit, tokens[i]));
+            CXCursor cursor;
+            clang_annotateTokens(translationUnit, &tokens[i], 1, &cursor);
 
             if (dumpNodes) {
                 std::cout << "\n - Token: " << clang_getTokenSpelling(translationUnit, tokens[i]) << std::endl;
                 std::cout << " - token kind: " << clang_getTokenKind(tokens[i]) << std::endl;
 
-                CXCursor cursor;
-                clang_annotateTokens(translationUnit, &tokens[i], 1, &cursor);
                 CXType type = clang_getCursorType(cursor);
                 std::cout << " - type " << clang_getTypeSpelling(type) << std::endl;
                 std::cout << " - kind " << clang_getTypeKindSpelling(type.kind) << std::endl;
@@ -285,8 +285,6 @@ struct Unfuckifier {
 
             // Handle "const auto" shit pointers
             if (tokenString == "const") {
-                CXCursor cursor;
-                clang_annotateTokens(translationUnit, &tokens[i], 1, &cursor);
                 CXType type = clang_getCursorType(cursor);
 
                 if (type.kind != CXType_Auto) {
@@ -311,8 +309,6 @@ struct Unfuckifier {
             if (prevWasAuto && clang_getTokenKind(tokens[i]) != CXToken_Keyword && tokenString == "&&") {
                 prevWasAuto = false;
 
-                CXCursor cursor;
-                clang_annotateTokens(translationUnit, &tokens[i], 1, &cursor);
                 if (cursor.kind != CXCursor_VarDecl) {
                     continue;
                 }
@@ -336,6 +332,7 @@ struct Unfuckifier {
 
                 continue;
             }
+
             prevWasAuto = false;
 
             if (clang_getTokenKind(tokens[i]) != CXToken_Keyword) {
