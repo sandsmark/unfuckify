@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.15)
 
 option(ENABLE_SANITIZERS "Enable runtime sanitizing (for development)")
 if (ENABLE_SANITIZERS)
@@ -13,6 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 project(unfuckify)
 find_package(Clang REQUIRED)
+include_directories(${CLANG_INCLUDE_DIRS})
 add_executable(unfuckify main.cpp test.cpp)
-target_link_libraries(unfuckify libclang)
+target_link_libraries(unfuckify ${LIBCLANG_LIBRARIES} libclang)
 install(TARGETS unfuckify DESTINATION bin)
