@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.0)
 
 option(ENABLE_SANITIZERS "Enable runtime sanitizing (for development)")
 if (ENABLE_SANITIZERS)
