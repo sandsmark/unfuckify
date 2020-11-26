@@ -255,14 +255,14 @@ struct Unfuckifier {
         clang_CompilationDatabase_dispose(compilationDatabase);
     }
 
-    void grokFile(const std::string &sourceFile, CXSourceRange extent)
+    void grokFile(const std::string &sourceFile, CXSourceRange fileExtent)
     {
         if (verbose) std::cout << "Checking " << sourceFile << std::endl;
 
         // We can't traverse the AST, because auto's are already resolved
         unsigned numTokens;
         CXToken *tokens = nullptr;
-        clang_tokenize(translationUnit, extent, &tokens, &numTokens);
+        clang_tokenize(translationUnit, fileExtent, &tokens, &numTokens);
 
         std::unordered_map<CXSourceLocation, Replacement> lambdas;
         std::unordered_map<CXSourceLocation, CXSourceLocation> autoLambdas;
