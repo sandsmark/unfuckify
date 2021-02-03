@@ -81,4 +81,6 @@ Cases it fails on:
 TODO
 ----
 
+ - Handle structured binding (the auto there hides std::pairs, or sometimes QPairs).
  - Find a proper function signature and create an appropriate std::function for lambdas.
+ - Chop off the ') const' in std::functions.
