@@ -687,7 +687,7 @@ struct Unfuckifier {
     bool fixFile(const std::string &filePath, std::vector<Replacement> &replacements)
     {
         std::sort(replacements.begin(), replacements.end(), [](const Replacement &a, const Replacement &b) {
-            return a.start > b.start;
+            return a.start < b.start;
         });
         // Meh, could check when we add them, but I'm lazy
         replacements.erase(std::unique(replacements.begin(), replacements.end(), [](const Replacement &a, const Replacement &b) {
