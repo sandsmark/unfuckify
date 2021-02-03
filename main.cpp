@@ -729,23 +729,31 @@ struct Unfuckifier {
 
         bool failed = false;
         for (const Replacement &replacement : replacements) {
-            //if (replacement.string.empty()) {
-            //    if (verbose) std::cout << "Skipping empty replacement" << std::endl;
-            //    continue;
-            //}
+            if (replacement.start <= lastPos) {
+                std::cerr << "Invalid replacements" << std::endl;
+                std::cout << replacement.string << " length " << replacement.string.size() << std::endl;
+                std::cout << "replacing length " << (int(replacement.end) - int(replacement.start)) << std::endl;
+                std::cout << (int(replacement.start) - int(lastPos)) << " " << lastPos << " " << replacement.start << " " << replacement.end << std::endl;
+                failed = true;
+                break;
+            }
+
             buffer.resize(replacement.start - lastPos);
-            if (fread(buffer.data(), buffer.size(), 1, file) != 1) {
-                std::cerr << "Failed to read from original file" << std::endl;
+            ssize_t byteCount = fread(buffer.data(), 1, buffer.size(), file);
+            if (byteCount != buffer.size()) {
+                std::cerr << "Failed to read all from " << filePath << " (only read " << byteCount << " bytes, expected " << buffer.size() << ")" << std::endl;
                 failed = true;
                 break;
             }
-            if  (fwrite(buffer.data(), buffer.size(), 1, outFile) != 1) {
-                std::cerr << "Failed to write to file" << std::endl;
+            byteCount = fwrite(buffer.data(), 1, buffer.size(), outFile);
+            if  (byteCount != buffer.size()) {
+                std::cerr << "Failed to old content to " << outFilePath << " (only wrote " << byteCount << " bytes, expected " << buffer.size() << ")" << std::endl;
                 failed = true;
                 break;
             }
-            if (fwrite(replacement.string.c_str(), replacement.string.size(), 1, outFile) != 1) {
-                std::cerr << "Failed to write replacement to file" << std::endl;
+            byteCount = fwrite(replacement.string.c_str(), 1, replacement.string.size(), outFile);
+            if (byteCount != replacement.string.size()) {
+                std::cerr << "Failed to write replacement to " << outFilePath << " (only wrote " << byteCount << " bytes, expected " << buffer.size() << ")" << std::endl;
                 failed = true;
                 break;
             }
