@@ -54,6 +54,29 @@ static bool operator==(const CXSourceLocation &a, const CXSourceLocation &b)
     return clang_equalLocations(a, b);
 }
 
+static void dumpNode(const CXCursor &cursor)
+{
+    CXType type = clang_getCursorType(cursor);
+    CXType pointerType = clang_getPointeeType(type);
+
+    std::cout << " > type " << clang_getTypeSpelling(type) << std::endl;
+    std::cout << " > kind " << clang_getTypeKindSpelling(type.kind) << std::endl;
+    std::cout << " > cursor kind " << clang_getCursorKindSpelling(cursor.kind) << std::endl;
+    std::cout << " > pointer type " << clang_getTypeSpelling(pointerType) << std::endl;
+
+    CXSourceRange extent = clang_getCursorExtent(cursor);
+    const CXSourceLocation start = clang_getRangeStart(extent);
+    const CXSourceLocation end = clang_getRangeEnd(extent);
+    unsigned lineStart, lineEnd;
+    unsigned colStart, colEnd;
+    CXFile fileStart, fileEnd;
+    clang_getSpellingLocation(start, &fileStart, &lineStart, &colStart, nullptr);
+    clang_getSpellingLocation(end, &fileEnd, &lineEnd, &colEnd, nullptr);
+
+    std::cerr << " > Starts at " << clang_getFileName(fileStart) << ":" << lineStart << ":" << colStart << std::endl;
+    std::cerr << " > Ends at " << clang_getFileName(fileEnd) << ":" << lineEnd << ":" << colEnd << std::endl;
+}
+
 struct Unfuckifier {
     struct Replacement {
         unsigned start, end;
@@ -100,6 +123,8 @@ struct Unfuckifier {
 
         CXType type = clang_getCursorType(cursor);
         CXType pointerType = clang_getPointeeType(type);
+
+        if (verbose) dumpNode(cursor);
 
         if (dumpNodes) {
             std::cout << " > type " << clang_getTypeSpelling(type) << std::endl;
