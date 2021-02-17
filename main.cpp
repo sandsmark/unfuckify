@@ -395,16 +395,26 @@ struct Unfuckifier {
                 }
                 if (replacement.string.find("(lambda at ") != std::string::npos) {
                     lambdas[clang_getCursorLocation(cursor)] = replacement;
+                    continue;
+                }
+
+                // a function pointer, a better way to detect it would be nice
+                const std::string::size_type startChop = replacement.string.find("(*)(");
+                if (startChop != std::string::npos) {
+                    replacement.string.erase(startChop, strlen("(*)"));
+                    replacement.string = "std::function<" + replacement.string + ">";
+                    replacements.push_back(replacement);
                 } else {
                     replacements.push_back(replacement);
                 }
+
                 continue;
             }
 
             // For some reason we have to keep checking the parents, doesn't seem like stuff is resolved otherwise
             CXCursor parent = clang_getCursorSemanticParent(cursor);
             CXType parentType = clang_getCursorType(parent);
-            if (parentType.kind == CXType_FunctionProto) {
+            if (parentType.kind == CXType_FunctionProto) {// should we check CXType_FunctionNoProto?
                 if (clang_getResultType(parentType).kind != CXType_Auto) {
                     continue;
                 }
