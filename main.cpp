@@ -115,6 +115,26 @@ struct Unfuckifier {
 
         return true;
     }
+    std::string regenerateStupidShit(CXCursor cursor)
+    {
+        std::string ret = getString(clang_getCursorPrettyPrinted(cursor, nullptr));
+        std::string actualType = getString(clang_getTypeSpelling(clang_getResultType(clang_getCursorType(cursor))));
+
+        size_t autoPos = ret.find("auto");
+        if (autoPos == std::string::npos) {
+            std::cout << "failed to find auto" << std::endl;
+            return "";
+        }
+        ret.replace(autoPos, 4, actualType);
+        const std::string toErase = ") -> " + actualType;
+        size_t fuckeryPos = ret.find(toErase);
+        if (fuckeryPos == std::string::npos) {
+            std::cout << "failed to find fuckery" << std::endl;
+            return "";
+        }
+        ret.erase(fuckeryPos + 1, toErase.size() - 1);
+        return ret;
+    }
 
     Replacement handleAutoToken(CXToken *autoToken, CXTranslationUnit translationUnit)
     {
@@ -198,6 +218,35 @@ struct Unfuckifier {
             } else {
                 replacement.string = replacement.string.substr(strlen("const "));
             }
+        }
+
+        if (replacement.string.find("auto (") == 0) {
+            if (!reformat) {
+                std::cerr << "Found 'auto foo() -> bar' shit, pass --reformat to fix it" << std::endl;
+                unsigned lineStart, lineEnd;
+                unsigned colStart, colEnd;
+                CXFile fileStart, fileEnd;
+                clang_getSpellingLocation(start, &fileStart, &lineStart, &colStart, nullptr);
+                clang_getSpellingLocation(end, &fileEnd, &lineEnd, &colEnd, nullptr);
+                std::cerr << " > Starts at " << clang_getFileName(fileStart) << ":" << lineStart << ":" << colStart << std::endl;
+                std::cerr << " > Ends at " << clang_getFileName(fileEnd) << ":" << lineEnd << ":" << colEnd << std::endl;
+                replacement.string = "";
+                return replacement;
+            }
+            extent = clang_getCursorExtent(cursor);
+            const CXSourceLocation start = clang_getRangeStart(extent);
+            const CXSourceLocation end = clang_getRangeEnd(extent);
+            clang_getSpellingLocation(start, nullptr, nullptr, nullptr, &replacement.start);
+            clang_getSpellingLocation(end, nullptr, nullptr, nullptr, &replacement.end);
+            replacement.string = regenerateStupidShit(cursor);
+            return replacement;
+        }
+
+        if (replacement.string.find("auto") == 0) {
+            std::cerr << "Clang failed to resolve type, got '" << replacement.string << "'" << std::endl;
+            dumpCursor(cursor);
+            replacement.string = "";
+            return replacement;
         }
 
         if (replacement.string.find("(lambda at ") != std::string::npos) {
@@ -319,6 +368,7 @@ struct Unfuckifier {
                 std::cout << " - kind " << clang_getTypeKindSpelling(type.kind) << std::endl;
                 std::cout << " - cursor kind " << clang_getCursorKindSpelling(cursor.kind) << std::endl;
                 std::cout << " - cursor type kind " << clang_getTypeKindSpelling(type.kind) << std::endl;
+                dumpCursor(cursor);
             }
 
             // Handle "const auto" shit pointers
@@ -447,7 +497,7 @@ struct Unfuckifier {
         clang_disposeTokens(translationUnit, tokens, numTokens);
 
         if (replacements.empty()) {
-            std::cout << sourceFile << " no autos." << std::endl;
+            std::cout << sourceFile << " no autos to replace." << std::endl;
             return;
         }
 
@@ -739,7 +789,7 @@ struct Unfuckifier {
 
         bool failed = false;
         for (const Replacement &replacement : replacements) {
-            if (replacement.start <= lastPos) {
+            if (replacement.start <= lastPos && lastPos > 0) {
                 std::cerr << "Invalid replacements" << std::endl;
                 std::cout << replacement.string << " length " << replacement.string.size() << std::endl;
                 std::cout << "replacing length " << (int(replacement.end) - int(replacement.start)) << std::endl;
@@ -825,6 +875,7 @@ struct Unfuckifier {
     bool skipBuildDir = true;
     bool dumpNodes = false;
     bool skipHeaders = false;
+    bool reformat = false;
     std::unordered_set<std::string> parsedFiles;
 };
 
@@ -832,7 +883,8 @@ static void printUsage(const std::string &executable)
 {
     std::cerr << "Please pass a compile_commands.json and a source file, or --all to fix all files in project" << std::endl;
     std::cerr << "To replace the existing files pass --replace" << std::endl;
-    std::cerr << "\t" << executable << " path/to/compile_commands.json [--verbose] [--dump-nodes] [--replace] [--skip-headers] [--stop-on-fail] [--all] [path/to/heretical.cpp]" << std::endl;
+    std::cerr << "\t" << executable << " path/to/compile_commands.json [--verbose] [--dump-nodes] [--replace] [--skip-headers] [--stop-on-fail] [--all] [--reformat] [path/to/heretical.cpp]" << std::endl;
+    std::cerr << "For some autos you will need to use --reformat, because we need to regenerate parts of the code" << std::endl;
     std::cerr << "To create a compilation database run cmake with '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON' on the project you're going to fix" << std::endl;
 }
 
@@ -870,6 +922,10 @@ int main(int argc, char *argv[])
         }
         if (arg == "--skip-headers") {
             fixer.skipHeaders = true;
+            continue;
+        }
+        if (arg == "--reformat") {
+            fixer.reformat = true;
             continue;
         }
         if (arg == "--stop-on-fail") {
